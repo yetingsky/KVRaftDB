@@ -30,6 +30,9 @@ import (
 // import "labgob"
 
 
+const HeartBeatInterval = 100 * time.Millisecond
+const CommitApplyIdleCheckInterval = 25 * time.Millisecond
+const LeaderPeerTickInterval = 10 * time.Millisecond
 
 //
 // as each Raft peer becomes aware that successive log entries are
@@ -70,11 +73,11 @@ type Raft struct {
 	votedFor int
 	commitIndex int
 	lastHeartBeat time.Time
-	heartbeatInterval time.Duration // 100ms
 
 	state ServerState
 	timeout time.Duration
 
+	leaderID int
 	//nextIndex []int
 	//matchIndex []int
 }
@@ -210,17 +213,23 @@ type AppendEntriesReply struct {
 
 func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
 	// Your code here (2A, 2B).
-	reply.Success = false
 	reply.Term = rf.term
-	rf.lastHeartBeat = time.Now()
-
-	if args.Term > rf.term {
-		rf.term = args.Term
-		return
+	if rf.isLeader() {
+		rf.log("I am a leader, why some dude gives me entry??????? %d", args.Term)
 	}
 	
-	rf.turnToFollow()
-	//rf.log("receive heartbeat from leader")
+	if args.Term < rf.term {
+		reply.Success = false
+		return
+	} else if args.Term >= rf.term {
+		rf.turnToFollow()
+		rf.term = args.Term
+		rf.leaderID = args.LeaderId
+	}
+
+	if rf.leaderID == args.LeaderId {
+		rf.lastHeartBeat = time.Now()
+	}
 }
 
 //
@@ -300,36 +309,52 @@ func (rf *Raft) Kill() {
 	// Your code here, if desired.
 }
 
-func (rf *Raft) appendEntriesLoopForPeer(server int) {
-	if rf.state != Leader {
-		return
+func (rf *Raft) sendAppendEntries(s int) {
+	args := &AppendEntriesArgs {
+		Term : rf.term,
+		LeaderId : rf.me,
 	}
-	//rf.log("append entries to %d", server)
-	
-	go func() {
-		args := &AppendEntriesArgs {
-			Term : rf.term,
-			LeaderId : rf.me,
+	reply := &AppendEntriesReply {}
+	ok := rf.appendEntries(s, args, reply)
+	if ok {
+		if reply.Term > rf.term {
+			rf.term = reply.Term
+			rf.turnToFollow()
 		}
-		reply := &AppendEntriesReply {}
-		ok := rf.appendEntries(server, args, reply)
-		if ok {
-			if reply.Term > rf.term {
-				rf.term = reply.Term
-				rf.turnToFollow()
-			}
-			if reply.Success {
-				// update log
+		if reply.Success {
+			// update log
+		}
+	}
+}
+
+func (rf *Raft) appendEntriesLoopForPeer(server int) {
+	ticker := time.NewTicker(LeaderPeerTickInterval)
+
+	rf.sendAppendEntries(server)
+	lastEntrySent := time.Now()
+
+	for {
+		rf.Lock()
+		if rf.state != Leader  {
+			ticker.Stop()
+			rf.UnLock()
+			break
+		}
+		rf.UnLock()
+
+		select {
+		case currentTime := <-ticker.C: 
+			if currentTime.Sub(lastEntrySent) >= HeartBeatInterval {
+				lastEntrySent = time.Now()
+				rf.sendAppendEntries(server)
 			}
 		}
-	}()
-	
-	time.After(rf.heartbeatInterval)
-	go rf.appendEntriesLoopForPeer(server)
+	}
 }
 
 func (rf *Raft) becomeLeader() {
 	rf.state = Leader
+	rf.leaderID = rf.me
 	rf.log("I am a leader!")
 
 	for p := range rf.peers {
@@ -341,13 +366,14 @@ func (rf *Raft) becomeLeader() {
 }
 
 func (rf *Raft) beginElection() {
+	rf.log("about to elect myself")
 	rf.state = Candidate
 	rf.term++
 	rf.votedFor = rf.me	
 
 	voteCount := 1
 	cachedTerm := rf.term
-	rf.log("about to elect myself")
+	
 	for s := range rf.peers {
 		if s == rf.me {
 			continue
@@ -387,7 +413,7 @@ func (rf *Raft) beginElection() {
 
 func (rf *Raft) startElectionProcess() {
 	electionTimeout := func() time.Duration { // Randomized timeouts between [500, 600)-ms
-		return (200 + time.Duration(rand.Intn(300))) * time.Millisecond
+		return (300 + time.Duration(rand.Intn(300))) * time.Millisecond
 	}
 
 	rf.timeout = electionTimeout()
@@ -398,6 +424,7 @@ func (rf *Raft) startElectionProcess() {
 
 	// Start election process if we're not a leader and the haven't received a heartbeat for `electionTimeout`
 	if rf.state != Leader && currentTime.Sub(rf.lastHeartBeat) >= rf.timeout {
+		log.Println("current time", currentTime, "last hearbeat", rf.lastHeartBeat)
 		go rf.beginElection()
 	}
 	go rf.startElectionProcess()
@@ -409,6 +436,8 @@ func (rf *Raft) startElectionProcess() {
 // of all the Raft servers (including this one) are in peers[]. this
 // server's port is peers[me]. all the servers' peers[] arrays
 // have the same order. persister is a place for this server to
+// save its persistent state, and also initially holds the most
+// recent saved state, if any. applyCh is a channel on which the
 // save its persistent state, and also initially holds the most
 // recent saved state, if any. applyCh is a channel on which the
 // tester or service expects Raft to send ApplyMsg messages.
@@ -426,7 +455,6 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.state = Follower
 	rf.term = 0
 	rf.votedFor = -1
-	rf.heartbeatInterval = time.Millisecond * 40 // small 
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
 	go rf.startElectionProcess()

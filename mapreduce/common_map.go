@@ -1,7 +1,13 @@
 package mapreduce
 
 import (
+	"os"
+	//"bytes"
+	"encoding/json"
+	//"fmt"
 	"hash/fnv"
+	"io/ioutil"
+	"log"
 )
 
 // doMap manages one map task: it reads one of the input files
@@ -53,6 +59,37 @@ func doMap(
 	//
 	// Remember to close the file after you have written all the values!
 	//
+
+	content, errr := ioutil.ReadFile(inFile)
+	if errr != nil {
+		log.Fatal(errr)
+	}
+	s := string(content[:])
+	kv := mapF(inFile, s)
+
+	for _, v := range kv {
+		r := ihash(v.Key) % nReduce
+		//fmt.Println("Selected r is: ", r)
+		fname := reduceName(jobName, mapTaskNumber, r)
+
+		// If the file doesn't exist, create it, or append to the file
+		f, err := os.OpenFile(fname, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		enc := json.NewEncoder(f)
+		err = enc.Encode(v)
+		if err != nil {
+			log.Fatal(err)
+			break
+		}
+
+		if err := f.Close(); err != nil {
+			log.Fatal(err)
+		}		
+	}
+	//fmt.Println("Done map")
 }
 
 func ihash(s string) int {

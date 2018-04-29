@@ -100,7 +100,7 @@ func makeInputs(num int) []string {
 	var names []string
 	var i = 0
 	for f := 0; f < num; f++ {
-		names = append(names, fmt.Sprintf("824-mrinput-%d.txt", f))
+		names = append(names, fmt.Sprintf("mrtmp824-mrinput-%d.txt", f))
 		file, err := os.Create(names[f])
 		if err != nil {
 			log.Fatal("mkInput: ", err)

@@ -65,11 +65,12 @@ func TestReElection2A(t *testing.T) {
 	// disturb the new leader.
 	fmt.Println("Connecting...", leader1)
 	cfg.connect(leader1)
-	cfg.checkOneLeader()
-	//leader2 := cfg.checkOneLeader()
+
+
+	leader2 := cfg.checkOneLeader()
 	// if there's no quorum, no leader should
 	// be elected.
-	/*fmt.Println("Disconnect", leader2)
+	fmt.Println("Disconnect", leader2)
 	cfg.disconnect(leader2)
 	fmt.Println("Disconnect", (leader2 + 1) % servers)
 	cfg.disconnect((leader2 + 1) % servers)
@@ -84,7 +85,7 @@ func TestReElection2A(t *testing.T) {
 
 	// re-join of last node shouldn't prevent leader from existing.
 	cfg.connect(leader2)
-	cfg.checkOneLeader()*/
+	cfg.checkOneLeader()
 
 	cfg.end()
 }
