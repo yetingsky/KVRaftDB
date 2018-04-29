@@ -22,7 +22,7 @@ import (
 	"log"
 	"time"
 	"sync"
-	"labrpc"
+	"kvdb/labrpc"
 	"math/rand"
 )
 
