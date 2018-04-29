@@ -1,0 +1,44 @@
+Test (2A): election after network failure ...
+2018/04/28 23:17:58 [INFO] Raft:[Id:0|Term:1|State:Candidate|] about to elect myself
+2018/04/28 23:17:58 [INFO] Raft:[Id:0|Term:1|State:Candidate|] gathering votes from little 2 term 1
+2018/04/28 23:17:58 [INFO] Raft:[Id:0|Term:1|State:Candidate|] gathering votes from little 1 term 1
+2018/04/28 23:17:58 [INFO] Raft:[Id:2|Term:0|State:Follower|] server 0 requires me to vote, your term is 1
+2018/04/28 23:17:58 [INFO] Raft:[Id:1|Term:0|State:Follower|] server 0 requires me to vote, your term is 1
+2018/04/28 23:17:58 [INFO] Raft:[Id:0|Term:1|State:Candidate|] gathered votes from little 2 term 1
+2018/04/28 23:17:58 [INFO] Raft:[Id:0|Term:1|State:Candidate|] receive from server 2 term 0 vote true
+2018/04/28 23:17:58 [INFO] Raft:[Id:0|Term:1|State:Leader|] I am a leader!
+2018/04/28 23:17:58 [INFO] Raft:[Id:0|Term:1|State:Candidate|] gathered votes from little 1 term 1
+2018/04/28 23:17:58 [INFO] Raft:[Id:0|Term:1|State:Leader|] receive from server 1 term 0 vote true
+Disconnect 0
+2018/04/28 23:17:59 [INFO] Raft:[Id:1|Term:2|State:Candidate|] about to elect myself
+2018/04/28 23:17:59 [INFO] Raft:[Id:1|Term:2|State:Candidate|] gathering votes from little 2 term 2
+2018/04/28 23:17:59 [INFO] Raft:[Id:2|Term:2|State:Candidate|] about to elect myself
+2018/04/28 23:17:59 [INFO] Raft:[Id:2|Term:2|State:Candidate|] gathering votes from little 1 term 2
+2018/04/28 23:17:59 [INFO] Raft:[Id:1|Term:2|State:Candidate|] gathering votes from little 0 term 2
+2018/04/28 23:17:59 [INFO] Raft:[Id:2|Term:2|State:Candidate|] gathering votes from little 0 term 2
+2018/04/28 23:18:00 [INFO] Raft:[Id:1|Term:3|State:Candidate|] about to elect myself
+2018/04/28 23:18:00 [INFO] Raft:[Id:1|Term:3|State:Candidate|] gathering votes from little 2 term 3
+2018/04/28 23:18:00 [INFO] Raft:[Id:1|Term:3|State:Candidate|] gathering votes from little 0 term 3
+2018/04/28 23:18:00 [INFO] Raft:[Id:2|Term:3|State:Candidate|] about to elect myself
+2018/04/28 23:18:00 [INFO] Raft:[Id:2|Term:3|State:Candidate|] gathering votes from little 1 term 3
+2018/04/28 23:18:00 [INFO] Raft:[Id:2|Term:3|State:Candidate|] gathering votes from little 0 term 3
+2018/04/28 23:18:00 [INFO] Raft:[Id:2|Term:3|State:Candidate|] server 1 requires me to vote, your term is 2
+2018/04/28 23:18:00 [INFO] Raft:[Id:1|Term:3|State:Candidate|] gathered votes from little 2 term 2
+2018/04/28 23:18:00 [INFO] Raft:[Id:1|Term:3|State:Candidate|] receive from server 2 term 3 vote false
+2018/04/28 23:18:00 [INFO] Raft:[Id:1|Term:3|State:Candidate|] server 2 requires me to vote, your term is 2
+2018/04/28 23:18:00 [INFO] Raft:[Id:2|Term:3|State:Candidate|] gathered votes from little 1 term 2
+2018/04/28 23:18:00 [INFO] Raft:[Id:2|Term:3|State:Candidate|] receive from server 1 term 3 vote false
+2018/04/28 23:18:01 [INFO] Raft:[Id:2|Term:4|State:Candidate|] about to elect myself
+2018/04/28 23:18:01 [INFO] Raft:[Id:2|Term:4|State:Candidate|] gathering votes from little 1 term 4
+2018/04/28 23:18:01 [INFO] Raft:[Id:2|Term:4|State:Candidate|] gathering votes from little 0 term 4
+2018/04/28 23:18:01 [INFO] Raft:[Id:1|Term:4|State:Candidate|] about to elect myself
+2018/04/28 23:18:01 [INFO] Raft:[Id:1|Term:4|State:Candidate|] gathering votes from little 2 term 4
+2018/04/28 23:18:01 [INFO] Raft:[Id:1|Term:4|State:Candidate|] gathering votes from little 0 term 4
+2018/04/28 23:18:02 [INFO] Raft:[Id:2|Term:5|State:Candidate|] about to elect myself
+2018/04/28 23:18:02 [INFO] Raft:[Id:2|Term:5|State:Candidate|] gathering votes from little 1 term 5
+2018/04/28 23:18:02 [INFO] Raft:[Id:2|Term:5|State:Candidate|] gathering votes from little 0 term 5
+2018/04/28 23:18:02 [INFO] Raft:[Id:2|Term:5|State:Candidate|] server 1 requires me to vote, your term is 3
+2018/04/28 23:18:02 [INFO] Raft:[Id:1|Term:4|State:Candidate|] gathered votes from little 2 term 3
+2018/04/28 23:18:02 [INFO] Raft:[Id:1|Term:4|State:Candidate|] receive from server 2 term 5 vote false
+2018/04/28 23:18:02 [INFO] Raft:[Id:1|Term:5|State:Follower|] server 2 requires me to vote, your term is 3
+2018/04/28 23:18:02 [INFO] Raft:[Id:2|Term:5|State:Candidate|] gathered votes from little 1 term 3
