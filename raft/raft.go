@@ -31,7 +31,7 @@ import (
 
 
 const HeartBeatInterval = 80 * time.Millisecond
-const CommitApplyIdleCheckInterval = 25 * time.Millisecond
+const CommitApplyIdleCheckInterval = 10 * time.Millisecond
 const LeaderPeerTickInterval = 10 * time.Millisecond
 
 //
@@ -248,7 +248,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		rf.lastHeartBeat = time.Now()
 	}
 
-	//log.Println(rf.me, "receives", args, "my logs are", rf.log)
+	log.Println(rf.me, "receives", args, "my logs are", rf.log)
 
 	// reply false if log not contain an entry at preLogIndex
 	if args.PreLogIndex > len(rf.log) {
@@ -257,18 +257,23 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	} else if args.PreLogIndex-1 >= 0 && rf.log[args.PreLogIndex-1].Term != args.PreLogTerm {
 		reply.Success = false
 		return
-	}	
-	reply.Success = true
+	}
+	
+	//if args.PreLogIndex-1 >= 0 && rf.log[args.PreLogIndex-1].Term == args.Term {
+		reply.Success = true
+	//}
+	
 	// TODO for now just one entry log
 	if len(args.Entries) > 0 {
 		rf.debug("append log entry %v", args.Entries[0])
 		rf.log = append(rf.log, args.Entries[0])
 	}	
 	
+	log.Println(rf.me, "request leader commit index is", args.LeaderCommit, "my commit index", rf.commitIndex, rf.log)
 	if args.LeaderCommit > rf.commitIndex {
 		rf.commitIndex = min(args.LeaderCommit, len(rf.log))
 	}
-	
+	log.Println(rf.me, "commit index", rf.commitIndex)
 }
 
 //
@@ -334,6 +339,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 		Cmd : command,
 		Term : rf.term,
 	}
+	log.Println("current length is", len(rf.log))
 	rf.log = append(rf.log, entry)
 	rf.debug("%v", rf.log)
 
@@ -352,25 +358,45 @@ func (rf *Raft) Kill() {
 }
 
 func (rf *Raft) updateCommitIndex() {
-	rf.commitIndex=1 // hack
+	i := len(rf.log)
+	for i > 0 {
+		//log.Println(rf.me, rf.log, i)
+		v := rf.log[i - 1]
+		count := 1
+		log.Println(v, "i is", i, "commit index", rf.commitIndex, "every body matches", rf.matchIndex)
+		if v.Term == rf.term && i > rf.commitIndex {
+			// check if has majority
+			// Note: this j the value, not index
+			for _,j := range rf.matchIndex {
+				if j == rf.me {
+					continue
+				}
+				if i >= j {
+					count++
+				}
+			}
+		}
+		log.Println(rf.me, "count is", count)
+		if count > len(rf.peers)/2 {
+			rf.commitIndex = i
+			log.Println(rf.me, "mushroom got commit index", rf.commitIndex)
+			break
+		}
+		i--
+	}
 }
 
 func (rf *Raft) sendAppendEntries(s int) {			
 	nIndex := rf.nextIndex[s]
 	entries := []Log{}
-	if len(rf.log) >= nIndex {
-		// we have the next log entry, so send it
-		startlogIndex := len(rf.log) - nIndex - 1
-		if startlogIndex < 0 {
-			startlogIndex = 0
-		}
-		log.Println("start log index", startlogIndex)
+	if len(rf.log) > 0 && len(rf.log) >= nIndex {
+		// we have the next log entry, so send it	
 		sendLog := Log {
-			Cmd : rf.log[startlogIndex].Cmd,
+			Cmd : rf.log[nIndex-1].Cmd,
 			Term : rf.term,
 		}
-		log.Println(rf.log, "send index", nIndex)
 		entries = append(entries, sendLog)
+		log.Println(rf.me, "sending entries", entries, "to", s, "my log", rf.log, "next index", nIndex, "length", len(rf.log))
 	}
 			
 	preIndex := rf.matchIndex[s]
@@ -405,14 +431,16 @@ func (rf *Raft) sendAppendEntries(s int) {
 			// update log
 			if len(entries) > 0 {
 				rf.nextIndex[s]++
-				rf.matchIndex[s]++
-				rf.updateCommitIndex()
-			}			
+				rf.matchIndex[s]++	
+				log.Println(s, "is happy now")			
+			}		
+			rf.updateCommitIndex()	
 		} else {
 			rf.debug("reduce next index for server %d", s)
-			if rf.nextIndex[s] > 0 {
-				rf.nextIndex[s]--
-			}			
+			rf.nextIndex[s]--
+			if rf.nextIndex[s] < 1 {
+				rf.nextIndex[s] = 1 // the min is 1
+			}
 		}
 	}
 }
@@ -533,10 +561,10 @@ func (rf *Raft) startElectionProcess() {
 
 func (rf *Raft) startLocalApplyProcess(applyChan chan ApplyMsg) {
 	for {
-		<-time.After(1 * time.Second)
+		<-time.After(CommitApplyIdleCheckInterval)
 
 		if rf.commitIndex > 0 {
-			log.Println(rf.me, "we are ready to send commit index", rf.commitIndex, rf.log)
+			//log.Println(rf.me, "we are ready to send commit index", rf.commitIndex, rf.log)
 			applyChan <- ApplyMsg {
 				CommandIndex:rf.commitIndex, 
 				Command:rf.log[rf.commitIndex-1].Cmd,
