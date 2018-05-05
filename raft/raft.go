@@ -179,7 +179,7 @@ type RequestVoteReply struct {
 //
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// Your code here (2A, 2B).
-	rf.log("server %d requires me to vote, your term is %d", args.CandidateId, args.Term)
+	//rf.log("server %d requires me to vote, your term is %d", args.CandidateId, args.Term)
 	reply.Term = rf.term
 
 	if args.Term < rf.term {
@@ -213,10 +213,10 @@ type AppendEntriesReply struct {
 
 func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
 	// Your code here (2A, 2B).
-	rf.log("receive append entry from leader %d", args.LeaderId)
+	//rf.log("receive append entry from leader %d", args.LeaderId)
 	reply.Term = rf.term
 	if rf.isLeader() {
-		rf.log("I am a leader, why some dude gives me entry??????? %d", args.Term)
+		//rf.log("I am a leader, why some dude gives me entry??????? %d", args.Term)
 	}
 	
 	if args.Term < rf.term {
@@ -263,9 +263,9 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 // the struct itself.
 //
 func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *RequestVoteReply) bool {
-	rf.log("gathering votes from little %d term %d" , server, args.Term)
+	//rf.log("gathering votes from little %d term %d" , server, args.Term)
 	ok := rf.peers[server].Call("Raft.RequestVote", args, reply)
-	rf.log("gathered votes from little %d term %d" , server, args.Term)
+	//rf.log("gathered votes from little %d term %d" , server, args.Term)
 	return ok
 }
 
@@ -347,6 +347,7 @@ func (rf *Raft) appendEntriesLoopForPeer(server int) {
 		case currentTime := <-ticker.C: 
 			if currentTime.Sub(lastEntrySent) >= HeartBeatInterval {
 				lastEntrySent = time.Now()
+				// we fire and contine, otherwise the loop stuck if the peer no responding
 				go rf.sendAppendEntries(server)
 			}
 		}
@@ -356,7 +357,7 @@ func (rf *Raft) appendEntriesLoopForPeer(server int) {
 func (rf *Raft) becomeLeader() {
 	rf.state = Leader
 	rf.leaderID = rf.me
-	rf.log("I am a leader!")
+	//rf.log("I am a leader!")
 
 	for p := range rf.peers {
 		if p == rf.me {
@@ -367,7 +368,7 @@ func (rf *Raft) becomeLeader() {
 }
 
 func (rf *Raft) beginElection() {
-	rf.log("about to elect myself")
+	//rf.log("about to elect myself")
 	rf.state = Candidate
 	rf.term++
 	rf.votedFor = rf.me	
@@ -389,7 +390,7 @@ func (rf *Raft) beginElection() {
 			reply := &RequestVoteReply{}
 			ok := rf.sendRequestVote(serverIndex, req, reply)
 			if ok {
-				rf.log("receive from server %d term %d vote %t", serverIndex, reply.Term, reply.VoteGranted)
+				//rf.log("receive from server %d term %d vote %t", serverIndex, reply.Term, reply.VoteGranted)
 
 				if cachedTerm == rf.term { // only process in same term
 					if reply.Term > rf.term {
@@ -405,7 +406,7 @@ func (rf *Raft) beginElection() {
 				}
 				
 			} else {
-				rf.log("why not ok for votes")
+				//rf.log("why not ok for votes")
 			}			
 		}(s)
 		
@@ -423,10 +424,10 @@ func (rf *Raft) startElectionProcess() {
 	rf.Lock()
 	defer rf.UnLock()
 
-	rf.log("idling. am I leader? %t", rf.isLeader())
+	//rf.log("idling. am I leader? %t", rf.isLeader())
 	// Start election process if we're not a leader and the haven't received a heartbeat for `electionTimeout`
 	if rf.state != Leader && currentTime.Sub(rf.lastHeartBeat) >= rf.timeout {
-		log.Println(rf.me, "current time", currentTime, "last hearbeat", rf.lastHeartBeat)
+		//log.Println(rf.me, "current time", currentTime, "last hearbeat", rf.lastHeartBeat)
 		go rf.beginElection()
 	}
 	go rf.startElectionProcess()
