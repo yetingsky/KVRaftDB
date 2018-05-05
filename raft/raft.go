@@ -170,7 +170,8 @@ type RequestVoteArgs struct {
 	// Your data here (2A, 2B).
 	Term int
 	CandidateId int
-	// lastLogIndex
+	LastLogIndex int
+	LastLogTerm int
 }
 
 //
@@ -183,6 +184,19 @@ type RequestVoteReply struct {
 	VoteGranted bool
 }
 
+func (rf *Raft) checkIfLogUpdateToDate(lastLogIndex int, lastLogTerm int) bool {
+	if len(rf.log) > lastLogIndex {
+		return false
+	} else if len(rf.log) == lastLogIndex {
+		_,term := rf.getLastLogEntry()
+		if term != lastLogTerm {
+			rf.debug("log length is the same, but the term is different, vote false")
+			return false
+		}
+	}
+	return true;
+}
+
 //
 // example RequestVote RPC handler.
 //
@@ -191,18 +205,23 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	//rf.debug("server %d requires me to vote, your term is %d", args.CandidateId, args.Term)
 	reply.Term = rf.term
 
+	// check if log is up-to-date
+	updateToDate := rf.checkIfLogUpdateToDate(args.LastLogIndex, args.LastLogTerm)
+
 	if args.Term < rf.term {
 		reply.VoteGranted = false		
-	} else if args.Term >= rf.term {
+	} else if args.Term >= rf.term && updateToDate{
 		rf.turnToFollow()
 		rf.term = args.Term
 		reply.VoteGranted = true
 		rf.votedFor = args.CandidateId
 		rf.lastHeartBeat = time.Now()
 	} else if rf.votedFor == -1 || args.CandidateId == rf.votedFor {
-		rf.votedFor = args.CandidateId
-		reply.VoteGranted = true
-		rf.lastHeartBeat = time.Now()
+		if updateToDate {
+			rf.votedFor = args.CandidateId
+			reply.VoteGranted = true
+			rf.lastHeartBeat = time.Now()
+		}		
 	}
 }
 
@@ -269,11 +288,11 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		rf.log = append(rf.log, args.Entries[0])
 	}	
 	
-	log.Println(rf.me, "request leader commit index is", args.LeaderCommit, "my commit index", rf.commitIndex, rf.log)
+	//log.Println(rf.me, "request leader commit index is", args.LeaderCommit, "my commit index", rf.commitIndex, rf.log)
 	if args.LeaderCommit > rf.commitIndex {
 		rf.commitIndex = min(args.LeaderCommit, len(rf.log))
 	}
-	log.Println(rf.me, "commit index", rf.commitIndex)
+	//log.Println(rf.me, "commit index", rf.commitIndex)
 }
 
 //
@@ -360,11 +379,10 @@ func (rf *Raft) Kill() {
 func (rf *Raft) updateCommitIndex() {
 	i := len(rf.log)
 	for i > 0 {
-		//log.Println(rf.me, rf.log, i)
 		v := rf.log[i - 1]
 		count := 1
-		log.Println(v, "i is", i, "commit index", rf.commitIndex, "every body matches", rf.matchIndex)
-		if v.Term == rf.term && i > rf.commitIndex {
+		log.Println(v, "i is", i, "commit index", rf.commitIndex, "every body matches", rf.matchIndex, "v term", v.Term, "my cur term", rf.term)
+		if /*v.Term == rf.term &&*/ i > rf.commitIndex {
 			// check if has majority
 			// Note: this j the value, not index
 			for _,j := range rf.matchIndex {
@@ -376,14 +394,15 @@ func (rf *Raft) updateCommitIndex() {
 				}
 			}
 		}
-		log.Println(rf.me, "count is", count)
+		//log.Println(rf.me, "count is", count)
 		if count > len(rf.peers)/2 {
 			rf.commitIndex = i
-			log.Println(rf.me, "mushroom got commit index", rf.commitIndex)
+			log.Println(rf.me, "peer got commit index", rf.commitIndex)
 			break
 		}
 		i--
 	}
+	log.Println(rf.me, "match indexes are", rf.matchIndex)
 }
 
 func (rf *Raft) sendAppendEntries(s int) {			
@@ -393,7 +412,7 @@ func (rf *Raft) sendAppendEntries(s int) {
 		// we have the next log entry, so send it	
 		sendLog := Log {
 			Cmd : rf.log[nIndex-1].Cmd,
-			Term : rf.term,
+			Term : rf.log[nIndex-1].Term,
 		}
 		entries = append(entries, sendLog)
 		log.Println(rf.me, "sending entries", entries, "to", s, "my log", rf.log, "next index", nIndex, "length", len(rf.log))
@@ -433,8 +452,7 @@ func (rf *Raft) sendAppendEntries(s int) {
 				rf.nextIndex[s]++
 				rf.matchIndex[s]++	
 				log.Println(s, "is happy now")			
-			}		
-			rf.updateCommitIndex()	
+			}	
 		} else {
 			rf.debug("reduce next index for server %d", s)
 			rf.nextIndex[s]--
@@ -443,6 +461,7 @@ func (rf *Raft) sendAppendEntries(s int) {
 			}
 		}
 	}
+	rf.updateCommitIndex()
 }
 
 func (rf *Raft) appendEntriesLoopForPeer(server int) {
@@ -476,21 +495,21 @@ func (rf *Raft) becomeLeader() {
 	rf.leaderID = rf.me
 	rf.debug("I am a leader!")
 
-	rf.nextIndex = make([]int, len(rf.peers))
-	// initialized to leader last log index + 1
-	logIndexInit := len(rf.log) + 1
-	for i := range rf.nextIndex {
-		rf.nextIndex[i] = logIndexInit
-	}
-
-	rf.matchIndex = make([]int, len(rf.peers)) // init to 0
-
 	for p := range rf.peers {
 		if p == rf.me {
 			continue
 		}	
 		go rf.appendEntriesLoopForPeer(p)
 	}
+}
+
+func (rf *Raft) getLastLogEntry() (int,int) {
+	if len(rf.log) == 0 {
+		return 0, 0
+	}
+	lastIndex := len(rf.log)
+	v := rf.log[lastIndex-1]
+	return lastIndex, v.Term
 }
 
 func (rf *Raft) beginElection() {
@@ -508,10 +527,12 @@ func (rf *Raft) beginElection() {
 		}	
 		
 		go func(serverIndex int) {
+			index, term := rf.getLastLogEntry()
 			req := &RequestVoteArgs{
 				Term : cachedTerm,
 				CandidateId : rf.me,
-				// log
+				LastLogIndex : index,
+				LastLogTerm : term,
 			}
 			reply := &RequestVoteReply{}
 			ok := rf.sendRequestVote(serverIndex, req, reply)
@@ -563,13 +584,14 @@ func (rf *Raft) startLocalApplyProcess(applyChan chan ApplyMsg) {
 	for {
 		<-time.After(CommitApplyIdleCheckInterval)
 
-		if rf.commitIndex > 0 {
-			//log.Println(rf.me, "we are ready to send commit index", rf.commitIndex, rf.log)
+		if rf.commitIndex > 0 && rf.commitIndex > rf.lastApplied {
+			log.Println(rf.me, "we are ready to send commit index", rf.commitIndex, rf.log, "last applied", rf.lastApplied)
 			applyChan <- ApplyMsg {
 				CommandIndex:rf.commitIndex, 
 				Command:rf.log[rf.commitIndex-1].Cmd,
 				CommandValid : true,
 			}
+			rf.lastApplied = rf.commitIndex
 		}
 	}	
 	
@@ -602,6 +624,14 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.commitIndex = 0
 	rf.lastApplied = 0
 	rf.log = []Log{}
+
+	rf.nextIndex = make([]int, len(rf.peers))
+	// initialized to leader last log index + 1
+	logIndexInit := len(rf.log) + 1
+	for i := range rf.nextIndex {
+		rf.nextIndex[i] = logIndexInit
+	}
+	rf.matchIndex = make([]int, len(rf.peers)) // init to 0
 
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
