@@ -267,7 +267,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		rf.lastHeartBeat = time.Now()
 	}
 
-	log.Println(rf.me, "receives", args, "my logs are", rf.log)
+	//log.Println(rf.me, "receives", args, "my logs are", rf.log)
 
 	// reply false if log not contain an entry at preLogIndex
 	if args.PreLogIndex > len(rf.log) {
@@ -284,7 +284,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	
 	// TODO for now just one entry log
 	if len(args.Entries) > 0 {
-		rf.debug("append log entry %v", args.Entries[0])
+		//rf.debug("append log entry %v", args.Entries[0])
 		rf.log = append(rf.log, args.Entries[0])
 	}	
 	
@@ -358,11 +358,10 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 		Cmd : command,
 		Term : rf.term,
 	}
-	log.Println("current length is", len(rf.log))
 	rf.log = append(rf.log, entry)
-	rf.debug("%v", rf.log)
+	//rf.debug("%v", rf.log)
 
-	rf.debug("add command %v", command)
+	//rf.debug("add command %v", command)
 	return len(rf.log), rf.term, true
 }
 
@@ -379,14 +378,14 @@ func (rf *Raft) Kill() {
 func (rf *Raft) updateCommitIndex() {
 	i := len(rf.log)
 	for i > 0 {
-		v := rf.log[i - 1]
+		//v := rf.log[i - 1]
 		count := 1
-		log.Println(v, "i is", i, "commit index", rf.commitIndex, "every body matches", rf.matchIndex, "v term", v.Term, "my cur term", rf.term)
+		//log.Println(v, "i is", i, "commit index", rf.commitIndex, "every body matches", rf.matchIndex, "v term", v.Term, "my cur term", rf.term)
 		if /*v.Term == rf.term &&*/ i > rf.commitIndex {
 			// check if has majority
 			// Note: this j the value, not index
-			for _,j := range rf.matchIndex {
-				if j == rf.me {
+			for serverIndex, j := range rf.matchIndex {
+				if serverIndex == rf.me {
 					continue
 				}
 				if i >= j {
@@ -397,12 +396,12 @@ func (rf *Raft) updateCommitIndex() {
 		//log.Println(rf.me, "count is", count)
 		if count > len(rf.peers)/2 {
 			rf.commitIndex = i
-			log.Println(rf.me, "peer got commit index", rf.commitIndex)
+			//log.Println(rf.me, "peer got commit index", rf.commitIndex)
 			break
 		}
 		i--
 	}
-	log.Println(rf.me, "match indexes are", rf.matchIndex)
+	//log.Println(rf.me, "match indexes are", rf.matchIndex)
 }
 
 func (rf *Raft) sendAppendEntries(s int) {			
@@ -415,7 +414,7 @@ func (rf *Raft) sendAppendEntries(s int) {
 			Term : rf.log[nIndex-1].Term,
 		}
 		entries = append(entries, sendLog)
-		log.Println(rf.me, "sending entries", entries, "to", s, "my log", rf.log, "next index", nIndex, "length", len(rf.log))
+		//log.Println(rf.me, "sending entries", entries, "to", s, "my log", rf.log, "next index", nIndex, "length", len(rf.log))
 	}
 			
 	preIndex := rf.matchIndex[s]
@@ -450,8 +449,7 @@ func (rf *Raft) sendAppendEntries(s int) {
 			// update log
 			if len(entries) > 0 {
 				rf.nextIndex[s]++
-				rf.matchIndex[s]++	
-				log.Println(s, "is happy now")			
+				rf.matchIndex[s]++			
 			}	
 		} else {
 			rf.debug("reduce next index for server %d", s)
@@ -585,7 +583,7 @@ func (rf *Raft) startLocalApplyProcess(applyChan chan ApplyMsg) {
 		<-time.After(CommitApplyIdleCheckInterval)
 
 		if rf.commitIndex > 0 && rf.commitIndex > rf.lastApplied {
-			log.Println(rf.me, "we are ready to send commit index", rf.commitIndex, rf.log, "last applied", rf.lastApplied)
+			//log.Println(rf.me, "we are ready to send commit index", rf.commitIndex, rf.log, "last applied", rf.lastApplied)
 			applyChan <- ApplyMsg {
 				CommandIndex:rf.commitIndex, 
 				Command:rf.log[rf.commitIndex-1].Cmd,
