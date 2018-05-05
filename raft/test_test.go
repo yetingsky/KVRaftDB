@@ -130,8 +130,8 @@ func TestFailAgree2B(t *testing.T) {
 	cfg.one(102, servers-1, false)
 	cfg.one(103, servers-1, false)
 	time.Sleep(RaftElectionTimeout)
-	/*cfg.one(104, servers-1, false)
-	cfg.one(105, servers-1, false)*/
+	cfg.one(104, servers-1, false)
+	cfg.one(105, servers-1, false)
 
 	// re-connect
 	cfg.connect((leader + 1) % servers)
@@ -140,7 +140,7 @@ func TestFailAgree2B(t *testing.T) {
 	// agree with full set of servers?
 	cfg.one(106, servers, true)
 	time.Sleep(RaftElectionTimeout)
-	//cfg.one(107, servers, true)
+	cfg.one(107, servers, true)
 
 	cfg.end()
 }
