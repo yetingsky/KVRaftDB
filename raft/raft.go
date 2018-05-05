@@ -30,7 +30,7 @@ import (
 // import "labgob"
 
 
-const HeartBeatInterval = 100 * time.Millisecond
+const HeartBeatInterval = 80 * time.Millisecond
 const CommitApplyIdleCheckInterval = 25 * time.Millisecond
 const LeaderPeerTickInterval = 10 * time.Millisecond
 
@@ -213,6 +213,7 @@ type AppendEntriesReply struct {
 
 func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
 	// Your code here (2A, 2B).
+	rf.log("receive append entry from leader %d", args.LeaderId)
 	reply.Term = rf.term
 	if rf.isLeader() {
 		rf.log("I am a leader, why some dude gives me entry??????? %d", args.Term)
@@ -346,7 +347,7 @@ func (rf *Raft) appendEntriesLoopForPeer(server int) {
 		case currentTime := <-ticker.C: 
 			if currentTime.Sub(lastEntrySent) >= HeartBeatInterval {
 				lastEntrySent = time.Now()
-				rf.sendAppendEntries(server)
+				go rf.sendAppendEntries(server)
 			}
 		}
 	}
@@ -379,9 +380,9 @@ func (rf *Raft) beginElection() {
 			continue
 		}	
 		
-		go func(serverIndex int, cache int) {
+		go func(serverIndex int) {
 			req := &RequestVoteArgs{
-				Term : cache,
+				Term : cachedTerm,
 				CandidateId : rf.me,
 				// log
 			}
@@ -390,13 +391,13 @@ func (rf *Raft) beginElection() {
 			if ok {
 				rf.log("receive from server %d term %d vote %t", serverIndex, reply.Term, reply.VoteGranted)
 
-				if cache == rf.term { // only process in same term
+				if cachedTerm == rf.term { // only process in same term
 					if reply.Term > rf.term {
 						rf.term = reply.Term
 						rf.turnToFollow()					
 					} else if reply.VoteGranted {
 						voteCount++
-						if voteCount >= len(rf.peers)/2 + 1 && rf.state == Candidate {
+						if voteCount > len(rf.peers)/2 && rf.state == Candidate {
 							rf.state = Leader
 							go rf.becomeLeader()
 						}
@@ -406,14 +407,14 @@ func (rf *Raft) beginElection() {
 			} else {
 				rf.log("why not ok for votes")
 			}			
-		}(s, cachedTerm)
+		}(s)
 		
 	}	
 }
 
 func (rf *Raft) startElectionProcess() {
 	electionTimeout := func() time.Duration { // Randomized timeouts between [500, 600)-ms
-		return (300 + time.Duration(rand.Intn(300))) * time.Millisecond
+		return (200 + time.Duration(rand.Intn(200))) * time.Millisecond
 	}
 
 	rf.timeout = electionTimeout()
@@ -422,9 +423,10 @@ func (rf *Raft) startElectionProcess() {
 	rf.Lock()
 	defer rf.UnLock()
 
+	rf.log("idling. am I leader? %t", rf.isLeader())
 	// Start election process if we're not a leader and the haven't received a heartbeat for `electionTimeout`
 	if rf.state != Leader && currentTime.Sub(rf.lastHeartBeat) >= rf.timeout {
-		log.Println("current time", currentTime, "last hearbeat", rf.lastHeartBeat)
+		log.Println(rf.me, "current time", currentTime, "last hearbeat", rf.lastHeartBeat)
 		go rf.beginElection()
 	}
 	go rf.startElectionProcess()

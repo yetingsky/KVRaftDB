@@ -66,7 +66,7 @@ func TestReElection2A(t *testing.T) {
 	fmt.Println("Connecting...", leader1)
 	cfg.connect(leader1)
 
-	time.Sleep(time.Duration(time.Second * 3))
+	//time.Sleep(time.Duration(time.Second * 3))
 
 	leader2 := cfg.checkOneLeader()
 	// if there's no quorum, no leader should
