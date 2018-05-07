@@ -378,10 +378,10 @@ func (rf *Raft) Kill() {
 func (rf *Raft) updateCommitIndex() {
 	i := len(rf.log)
 	for i > 0 {
-		//v := rf.log[i - 1]
+		v := rf.log[i - 1]
 		count := 1
 		//log.Println(v, "i is", i, "commit index", rf.commitIndex, "every body matches", rf.matchIndex, "v term", v.Term, "my cur term", rf.term)
-		if /*v.Term == rf.term &&*/ i > rf.commitIndex {
+		if v.Term == rf.term && i > rf.commitIndex {
 			// check if has majority
 			// Note: this j the value, not index
 			for serverIndex, j := range rf.matchIndex {
@@ -583,12 +583,26 @@ func (rf *Raft) startLocalApplyProcess(applyChan chan ApplyMsg) {
 		<-time.After(CommitApplyIdleCheckInterval)
 
 		if rf.commitIndex > 0 && rf.commitIndex > rf.lastApplied {
-			//log.Println(rf.me, "we are ready to send commit index", rf.commitIndex, rf.log, "last applied", rf.lastApplied)
-			applyChan <- ApplyMsg {
-				CommandIndex:rf.commitIndex, 
-				Command:rf.log[rf.commitIndex-1].Cmd,
-				CommandValid : true,
+			if rf.commitIndex - rf.lastApplied > 1 {
+				log.Println(rf.me, "we are ready to send commit index", rf.commitIndex, rf.log, "last applied", rf.lastApplied)
 			}
+
+			// we need to fill the missing commit entries			
+			nextLogIndex := rf.lastApplied // next log index we want to apply
+			for nextLogIndex < rf.commitIndex {
+				if rf.commitIndex - rf.lastApplied > 1 {
+					log.Println(rf.me, "send index", nextLogIndex)
+				}
+
+				applyChan <- ApplyMsg {
+					CommandIndex:nextLogIndex + 1, // index starts from 1. log index starts from 0
+					Command:rf.log[nextLogIndex].Cmd,
+					CommandValid : true,
+				}				
+				
+				nextLogIndex++
+			}
+			
 			rf.lastApplied = rf.commitIndex
 		}
 	}	
