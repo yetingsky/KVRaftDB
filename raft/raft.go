@@ -267,7 +267,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		rf.lastHeartBeat = time.Now()
 	}
 
-	//log.Println(rf.me, "receives", args, "my logs are", rf.log)
+	log.Println(rf.me, "receives", args, "my logs are", rf.log)
 
 	// reply false if log not contain an entry at preLogIndex
 	if args.PreLogIndex > len(rf.log) {
@@ -288,11 +288,11 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		rf.log = append(rf.log, args.Entries[0])
 	}	
 	
-	//log.Println(rf.me, "request leader commit index is", args.LeaderCommit, "my commit index", rf.commitIndex, rf.log)
+	log.Println(rf.me, "request leader commit index is", args.LeaderCommit, "my commit index", rf.commitIndex, rf.log)
 	if args.LeaderCommit > rf.commitIndex {
 		rf.commitIndex = min(args.LeaderCommit, len(rf.log))
 	}
-	//log.Println(rf.me, "commit index", rf.commitIndex)
+	log.Println(rf.me, "commit index", rf.commitIndex)
 }
 
 //
@@ -388,7 +388,8 @@ func (rf *Raft) updateCommitIndex() {
 				if serverIndex == rf.me {
 					continue
 				}
-				if i >= j {
+				// for any matchIndex value (j), if larger or equal to i (the log index starting from last), incre count.
+				if j >= i { 
 					count++
 				}
 			}
@@ -396,7 +397,7 @@ func (rf *Raft) updateCommitIndex() {
 		//log.Println(rf.me, "count is", count)
 		if count > len(rf.peers)/2 {
 			rf.commitIndex = i
-			//log.Println(rf.me, "peer got commit index", rf.commitIndex)
+			//log.Println(rf.me, "peer got commit index", rf.commitIndex, "count is", count, "peer num is", len(rf.peers)/2)
 			break
 		}
 		i--
@@ -435,6 +436,10 @@ func (rf *Raft) sendAppendEntries(s int) {
 		Entries : entries,
 		LeaderCommit : rf.commitIndex,
 	}	
+
+	if rf.commitIndex == 2 {
+		log.Println("werid", args, rf.log)
+	}
 	
 	reply := &AppendEntriesReply {}
 	ok := rf.appendEntries(s, args, reply)
