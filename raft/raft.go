@@ -364,14 +364,16 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 		return -1, -1, false
 	}
 
+	rf.Lock()
 	entry := Log{
 		Cmd : command,
 		Term : rf.term,
 	}
 	rf.log = append(rf.log, entry)
+	rf.UnLock()
 	//rf.debug("%v", rf.log)
 
-	//rf.debug("add command %v", command)
+	rf.debug("add command %v", command)
 	return len(rf.log), rf.term, true
 }
 
