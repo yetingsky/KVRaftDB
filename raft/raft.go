@@ -267,7 +267,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		rf.lastHeartBeat = time.Now()
 	}
 
-	//log.Println(rf.me, "receives", args, "my logs are", rf.log)
+	log.Println(rf.me, "receives", args, "my logs are", rf.log)
 
 	// reply false if log not contain an entry at preLogIndex
 	if args.PreLogIndex > len(rf.log) {
@@ -278,10 +278,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		return
 	}
 	
-	//if args.PreLogIndex-1 >= 0 && rf.log[args.PreLogIndex-1].Term == args.Term {
-		reply.Success = true
-	//}
-	
+	reply.Success = true	
 	// TODO for now just one entry log
 	if len(args.Entries) > 0 {
 		// if an existing entry conflicts with a new one
@@ -292,18 +289,20 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 				log.Println("mushroom before", rf.log, "args:", args)
 				rf.log = rf.log[:args.PreLogIndex]
 				log.Println("mushroom after", rf.log)
+			} else if e.Cmd == args.Entries[0].Cmd {
+				log.Println("mushroom existing entry", rf.log)
+				rf.log = rf.log[:args.PreLogIndex]
 			}
 		}		
-		
 
 		rf.log = append(rf.log, args.Entries[0])
 	}	
 	
-	//log.Println(rf.me, "request leader commit index is", args.LeaderCommit, "my commit index", rf.commitIndex, rf.log)
+	log.Println(rf.me, "request leader commit index is", args.LeaderCommit, "my commit index", rf.commitIndex, rf.log)
 	if args.LeaderCommit > rf.commitIndex {
 		rf.commitIndex = min(args.LeaderCommit, len(rf.log))
 	}
-	//log.Println(rf.me, "commit index", rf.commitIndex)
+	log.Println(rf.me, "commit index", rf.commitIndex)
 }
 
 //
@@ -408,7 +407,7 @@ func (rf *Raft) updateCommitIndex() {
 		//log.Println(rf.me, "count is", count)
 		if count > len(rf.peers)/2 {
 			rf.commitIndex = i
-			//log.Println(rf.me, "peer got commit index", rf.commitIndex, "count is", count, "peer num is", len(rf.peers)/2)
+			log.Println(rf.me, "peer got commit index", rf.commitIndex, "count is", count, "peer num is", len(rf.peers)/2)
 			break
 		}
 		i--
@@ -426,10 +425,10 @@ func (rf *Raft) sendAppendEntries(s int) {
 			Term : rf.log[nIndex-1].Term,
 		}
 		entries = append(entries, sendLog)
-		//log.Println(rf.me, "sending entries", entries, "to", s, "my log", rf.log, "next index", nIndex, "length", len(rf.log))
+		log.Println(rf.me, "sending entries", entries, "to", s, "my log", rf.log, "next index", nIndex, "length", len(rf.log))
 	}
-			
-	preIndex := rf.matchIndex[s]
+		
+	preIndex := rf.matchIndex[s]	
 	preTerm := 0
 	if len(rf.log) > 0 && len(rf.log) >= preIndex {
 		preLogIndex := preIndex -1
@@ -437,7 +436,9 @@ func (rf *Raft) sendAppendEntries(s int) {
 			preLogIndex = 0
 		}
 		preTerm = rf.log[preLogIndex].Term
-	}		
+	} else {
+		log.Println(rf.me, "mama sending entries", entries, "to", s, "my log", rf.log, "pre index", preIndex)
+	}
 	
 	args := AppendEntriesArgs {
 		Term : rf.term,
@@ -460,8 +461,11 @@ func (rf *Raft) sendAppendEntries(s int) {
 		if reply.Success {
 			// update log
 			if len(entries) > 0 {
-				rf.nextIndex[s]++
-				rf.matchIndex[s]++			
+				// this is to prevent duplicate packet being received. Only incre if matched.
+				if rf.matchIndex[s] == preIndex { 
+					rf.nextIndex[s]++
+					rf.matchIndex[s]++
+				}							
 			}	
 		} else {
 			rf.debug("reduce next index for server %d", s)
