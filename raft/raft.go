@@ -267,7 +267,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		rf.lastHeartBeat = time.Now()
 	}
 
-	log.Println(rf.me, "receives", args, "my logs are", rf.log)
+	//log.Println(rf.me, "receives", args, "my logs are", rf.log)
 
 	// reply false if log not contain an entry at preLogIndex
 	if args.PreLogIndex > len(rf.log) {
@@ -284,15 +284,26 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	
 	// TODO for now just one entry log
 	if len(args.Entries) > 0 {
-		//rf.debug("append log entry %v", args.Entries[0])
+		// if an existing entry conflicts with a new one
+		// same index, different terms, delete existing entry and all that follow it
+		if len(rf.log) > args.PreLogIndex {
+			e := rf.log[args.PreLogIndex]
+			if e.Term != args.Entries[0].Term {
+				log.Println("mushroom before", rf.log, "args:", args)
+				rf.log = rf.log[:args.PreLogIndex]
+				log.Println("mushroom after", rf.log)
+			}
+		}		
+		
+
 		rf.log = append(rf.log, args.Entries[0])
 	}	
 	
-	log.Println(rf.me, "request leader commit index is", args.LeaderCommit, "my commit index", rf.commitIndex, rf.log)
+	//log.Println(rf.me, "request leader commit index is", args.LeaderCommit, "my commit index", rf.commitIndex, rf.log)
 	if args.LeaderCommit > rf.commitIndex {
 		rf.commitIndex = min(args.LeaderCommit, len(rf.log))
 	}
-	log.Println(rf.me, "commit index", rf.commitIndex)
+	//log.Println(rf.me, "commit index", rf.commitIndex)
 }
 
 //
@@ -436,10 +447,6 @@ func (rf *Raft) sendAppendEntries(s int) {
 		Entries : entries,
 		LeaderCommit : rf.commitIndex,
 	}	
-
-	if rf.commitIndex == 2 {
-		log.Println("werid", args, rf.log)
-	}
 	
 	reply := &AppendEntriesReply {}
 	ok := rf.appendEntries(s, args, reply)
