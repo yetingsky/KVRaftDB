@@ -61,6 +61,7 @@ const (
 type Log struct {
 	Cmd interface{}
 	Term int
+	Index int
 }
 
 //
@@ -278,31 +279,54 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		return
 	}
 	
-	reply.Success = true	
-	// TODO for now just one entry log
-	if len(args.Entries) > 0 {
-		// if an existing entry conflicts with a new one
-		// same index, different terms, delete existing entry and all that follow it
-		if len(rf.log) > args.PreLogIndex {
-			e := rf.log[args.PreLogIndex]
-			if e.Term != args.Entries[0].Term {
-				//log.Println("mushroom before", rf.log, "args:", args)
-				rf.log = rf.log[:args.PreLogIndex]
-				//log.Println("mushroom after", rf.log)
-			} else if e.Cmd == args.Entries[0].Cmd {
-				//log.Println("mushroom existing entry", rf.log)
-				rf.log = rf.log[:args.PreLogIndex]
+	// find previous index
+	preIndex := -1
+	for i, v := range rf.log {
+		if v.Index == args.PreLogIndex {
+			if v.Term == args.PreLogTerm {
+				preIndex = i
+				break
 			}
-		}		
-
-		rf.log = append(rf.log, args.Entries[0])
-	}	
-	
-	//log.Println(rf.me, "request leader commit index is", args.LeaderCommit, "my commit index", rf.commitIndex, rf.log)
-	if args.LeaderCommit > rf.commitIndex {
-		rf.commitIndex = min(args.LeaderCommit, len(rf.log))
+		}
 	}
-	//log.Println(rf.me, "commit index", rf.commitIndex)
+
+	PrevIsBeginningOfLog := args.PreLogIndex == 0 && args.PreLogTerm == 0
+
+	// compare start from preIndex+1
+	// Note: preIndex is possible to be -1 in two cases:
+	// 1. No match
+	// 2. args.prev is the beginning of log 
+	if preIndex >= 0 || PrevIsBeginningOfLog {
+		entryIndex := 0
+		for i := preIndex + 1; i < len(rf.log); i++ {
+			entryConsistent := func() bool {
+				localEntry, argsEntry := rf.log[i], args.Entries[entryIndex]
+				return (localEntry.Term == argsEntry.Term) && (localEntry.Index == argsEntry.Index)
+			}
+
+			if entryIndex >= len(args.Entries) || !entryConsistent() {
+				// delete extra inconsistent entries, exclude the current i since it is inconsistent
+				rf.log = rf.log[:i]
+				break;
+			} else {
+				entryIndex++
+			}
+		}
+
+		// append the rest of NEW entries, starting from entryIndex
+		if entryIndex < len(args.Entries) {
+			rf.log = append(rf.log, args.Entries[entryIndex:]...)
+		}
+
+		//log.Println(rf.me, "request leader commit index is", args.LeaderCommit, "my commit index", rf.commitIndex, rf.log)
+		if args.LeaderCommit > rf.commitIndex {
+			rf.commitIndex = min(args.LeaderCommit, len(rf.log))
+		}
+		//log.Println(rf.me, "commit index", rf.commitIndex)
+		reply.Success = true
+	} else {
+		reply.Success = false
+	}
 }
 
 //
@@ -368,6 +392,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	entry := Log{
 		Cmd : command,
 		Term : rf.term,
+		Index : len(rf.log) + 1,
 	}
 	rf.log = append(rf.log, entry)
 	rf.UnLock()
