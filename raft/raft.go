@@ -280,6 +280,9 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	}
 	
 	// find previous index
+	// Note: preIndex is -1 in two cases:
+	// 1. No match. Reply false!
+	// 2. args.prev is the beginning of log, we need to process
 	preIndex := -1
 	for i, v := range rf.log {
 		if v.Index == args.PreLogIndex {
@@ -291,11 +294,8 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	}
 
 	PrevIsBeginningOfLog := args.PreLogIndex == 0 && args.PreLogTerm == 0
-
 	// compare start from preIndex+1
-	// Note: preIndex is possible to be -1 in two cases:
-	// 1. No match
-	// 2. args.prev is the beginning of log 
+	// so if we found it, or prev is the beginning, we process
 	if preIndex >= 0 || PrevIsBeginningOfLog {
 		entryIndex := 0
 		for i := preIndex + 1; i < len(rf.log); i++ {
