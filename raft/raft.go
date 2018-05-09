@@ -204,6 +204,10 @@ func (rf *Raft) checkIfLogUpdateToDate(lastLogIndex int, lastLogTerm int) bool {
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// Your code here (2A, 2B).
 	//rf.debug("server %d requires me to vote, your term is %d", args.CandidateId, args.Term)
+
+	rf.Lock()
+	defer rf.UnLock()
+
 	reply.Term = rf.term
 
 	// check if log is up-to-date
@@ -279,6 +283,9 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		return
 	}
 	
+	rf.Lock()
+	defer rf.UnLock()
+
 	// find previous index
 	// Note: preIndex is -1 in two cases:
 	// 1. No match. Reply false!
@@ -389,13 +396,14 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	}
 
 	rf.Lock()
+	defer rf.UnLock()
 	entry := Log{
 		Cmd : command,
 		Term : rf.term,
 		Index : len(rf.log) + 1,
 	}
 	rf.log = append(rf.log, entry)
-	rf.UnLock()
+	
 	//rf.debug("%v", rf.log)
 
 	rf.debug("add command %v", command)
@@ -413,6 +421,9 @@ func (rf *Raft) Kill() {
 }
 
 func (rf *Raft) updateCommitIndex() {
+	rf.Lock()
+	defer rf.UnLock()
+
 	i := len(rf.log)
 	for i > 0 {
 		v := rf.log[i - 1]
@@ -448,6 +459,7 @@ func (rf *Raft) sendAppendEntries(s int) {
 	preLogTerm := 0
 	lastLogIndex,_ := rf.getLastLogEntry()
 
+	rf.Lock()
 	// if we have log entry, and our logs contain nextIndex[s]
 	if lastLogIndex > 0 && lastLogIndex >= rf.nextIndex[s] {
 		// send all missing entries!
@@ -485,6 +497,8 @@ func (rf *Raft) sendAppendEntries(s int) {
 		LeaderCommit : rf.commitIndex,
 	}	
 	
+	rf.UnLock()
+
 	reply := &AppendEntriesReply {}
 	ok := rf.appendEntries(s, args, reply)
 	if ok {
@@ -494,6 +508,7 @@ func (rf *Raft) sendAppendEntries(s int) {
 			return // we are out
 		}
 
+		rf.Lock()
 		if reply.Success {
 			// update log
 			if len(entries) > 0 {
@@ -507,6 +522,7 @@ func (rf *Raft) sendAppendEntries(s int) {
 				rf.nextIndex[s] = 1 // the min is 1
 			}
 		}
+		rf.UnLock()
 	}
 	rf.updateCommitIndex()
 }
