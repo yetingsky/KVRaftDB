@@ -267,7 +267,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		rf.lastHeartBeat = time.Now()
 	}
 
-	log.Println(rf.me, "receives", args, "my logs are", rf.log)
+	//log.Println(rf.me, "receives", args, "my logs are", rf.log)
 
 	// reply false if log not contain an entry at preLogIndex
 	if args.PreLogIndex > len(rf.log) {
@@ -286,11 +286,11 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		if len(rf.log) > args.PreLogIndex {
 			e := rf.log[args.PreLogIndex]
 			if e.Term != args.Entries[0].Term {
-				log.Println("mushroom before", rf.log, "args:", args)
+				//log.Println("mushroom before", rf.log, "args:", args)
 				rf.log = rf.log[:args.PreLogIndex]
-				log.Println("mushroom after", rf.log)
+				//log.Println("mushroom after", rf.log)
 			} else if e.Cmd == args.Entries[0].Cmd {
-				log.Println("mushroom existing entry", rf.log)
+				//log.Println("mushroom existing entry", rf.log)
 				rf.log = rf.log[:args.PreLogIndex]
 			}
 		}		
@@ -298,11 +298,11 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		rf.log = append(rf.log, args.Entries[0])
 	}	
 	
-	log.Println(rf.me, "request leader commit index is", args.LeaderCommit, "my commit index", rf.commitIndex, rf.log)
+	//log.Println(rf.me, "request leader commit index is", args.LeaderCommit, "my commit index", rf.commitIndex, rf.log)
 	if args.LeaderCommit > rf.commitIndex {
 		rf.commitIndex = min(args.LeaderCommit, len(rf.log))
 	}
-	log.Println(rf.me, "commit index", rf.commitIndex)
+	//log.Println(rf.me, "commit index", rf.commitIndex)
 }
 
 //
@@ -417,36 +417,45 @@ func (rf *Raft) updateCommitIndex() {
 	//log.Println(rf.me, "match indexes are", rf.matchIndex)
 }
 
-func (rf *Raft) sendAppendEntries(s int) {			
-	nIndex := rf.nextIndex[s]
+func (rf *Raft) sendAppendEntries(s int) {
 	entries := []Log{}
-	if len(rf.log) > 0 && len(rf.log) >= nIndex {
-		// we have the next log entry, so send it	
-		sendLog := Log {
-			Cmd : rf.log[nIndex-1].Cmd,
-			Term : rf.log[nIndex-1].Term,
+	preLogIndex := 0
+	preLogTerm := 0
+	lastLogIndex,_ := rf.getLastLogEntry()
+
+	// if we have log entry, and our logs contain nextIndex[s]
+	if lastLogIndex > 0 && lastLogIndex >= rf.nextIndex[s] {
+		// send all missing entries!
+		for i,_ := range rf.log {
+			// current i plus 1 is the log index. Only proceed if we are currently at next index for peer
+			if i + 1 == rf.nextIndex[s] {
+				if i > 0 {
+					// get previous index's log index.
+					preLogIndex = (i - 1) + 1
+					preLogTerm = rf.log[i - 1].Term
+				}
+				// Note: length of log minus previous log index is len(rf.log)-i
+				// the current one we need to send, so from current to the end
+				entries = make([]Log, len(rf.log) - preLogIndex)
+				copy(entries, rf.log[i:])
+				//log.Println(rf.me, "mama sending entries", entries, "to", s, "my log", rf.log, "pre index", preLogIndex)
+				break
+			}
 		}
-		entries = append(entries, sendLog)
-		log.Println(rf.me, "sending entries", entries, "to", s, "my log", rf.log, "next index", nIndex, "length", len(rf.log))
-	}
-		
-	preIndex := rf.matchIndex[s]	
-	preTerm := 0
-	if len(rf.log) > 0 && len(rf.log) >= preIndex {
-		preLogIndex := preIndex -1
-		if preLogIndex < 0 {
-			preLogIndex = 0
-		}
-		preTerm = rf.log[preLogIndex].Term
 	} else {
-		log.Println(rf.me, "mama sending entries", entries, "to", s, "my log", rf.log, "pre index", preIndex)
+		if len(rf.log) > 0 {
+			// nextIndex larger than our last log index, we send heartbeat since we assume the peer is up-to-date
+			// if it is not, then they will reply false back to us, so we decrement
+			preLogIndex, preLogTerm = rf.getLastLogEntry()
+			//log.Println(rf.me, "last log index term are", preLogIndex, preLogTerm)
+		}		
 	}
 	
 	args := AppendEntriesArgs {
 		Term : rf.term,
 		LeaderId : rf.me,
-		PreLogIndex : preIndex,
-		PreLogTerm : preTerm,
+		PreLogIndex : preLogIndex,
+		PreLogTerm : preLogTerm,
 		Entries : entries,
 		LeaderCommit : rf.commitIndex,
 	}	
@@ -463,14 +472,11 @@ func (rf *Raft) sendAppendEntries(s int) {
 		if reply.Success {
 			// update log
 			if len(entries) > 0 {
-				// this is to prevent duplicate packet being received. Only incre if matched.
-				if rf.matchIndex[s] == preIndex { 
-					rf.nextIndex[s]++
-					rf.matchIndex[s]++
-				}							
+				rf.matchIndex[s] = preLogIndex + len(entries)
+				rf.nextIndex[s] = rf.matchIndex[s] + 1				
 			}	
 		} else {
-			rf.debug("reduce next index for server %d", s)
+			//rf.debug("reduce next index for server %d", s)
 			rf.nextIndex[s]--
 			if rf.nextIndex[s] < 1 {
 				rf.nextIndex[s] = 1 // the min is 1
@@ -514,7 +520,11 @@ func (rf *Raft) becomeLeader() {
 	for p := range rf.peers {
 		if p == rf.me {
 			continue
-		}	
+		}
+		
+		rf.nextIndex[p] = len(rf.log) + 1 // Should be initialized to leader's last log index + 1
+		rf.matchIndex[p] = 0              // Index of highest log entry known to be replicated on server
+
 		go rf.appendEntriesLoopForPeer(p)
 	}
 }
