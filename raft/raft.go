@@ -563,7 +563,7 @@ func (rf *Raft) sendAppendEntries(s int) {
 				rf.nextIndex[s] = rf.matchIndex[s] + 1
 			}	
 		} else {
-			//rf.debug("reduce next index for server %d", s)
+			rf.debug("reduce next index for server %d", s)
 			rf.nextIndex[s]--
 			if rf.nextIndex[s] < 1 {
 				rf.nextIndex[s] = 1 // the min is 1
