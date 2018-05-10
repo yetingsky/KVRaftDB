@@ -270,6 +270,8 @@ type AppendEntriesArgs struct {
 type AppendEntriesReply struct {
 	Term int
 	Success bool
+	ConflictingLogTerm int
+	ConflictingLogIndex int
 }
 
 func min(a, b int) int {
@@ -301,16 +303,16 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 	rf.persist()
 
-	log.Println(rf.me, "receives", args, "my logs are", rf.log)
+	//log.Println(rf.me, "receives", args, "my logs are", rf.log)
 
 	// reply false if log not contain an entry at preLogIndex
-	if args.PreLogIndex > len(rf.log) {
+	/*if args.PreLogIndex > len(rf.log) {
 		reply.Success = false
 		return
 	} else if args.PreLogIndex-1 >= 0 && rf.log[args.PreLogIndex-1].Term != args.PreLogTerm {
 		reply.Success = false
 		return
-	}
+	}*/
 	
 	rf.Lock()
 	defer rf.UnLock()
@@ -325,6 +327,9 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 			if v.Term == args.PreLogTerm {
 				preIndex = i
 				break
+			} else {
+				// now we have the conflict term
+				reply.ConflictingLogTerm = v.Term
 			}
 		}
 	}
@@ -361,6 +366,20 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		log.Println(rf.me, "commit index", rf.commitIndex)
 		reply.Success = true
 	} else {
+		// When rejecting AppendEntries, followers include the term of the conflicting entry,
+		// and the first index it stores for that term
+		if reply.ConflictingLogTerm == 0 && len(rf.log) > 0 {
+			reply.ConflictingLogTerm = rf.log[len(rf.log)-1].Term
+		}
+
+		for _,v := range rf.log {
+			// get the conflict index for the conflict term
+			if v.Term == reply.ConflictingLogTerm {
+				reply.ConflictingLogIndex = v.Index
+				break
+			}
+		}
+
 		reply.Success = false
 	}
 	rf.persist()
@@ -564,10 +583,12 @@ func (rf *Raft) sendAppendEntries(s int) {
 			}	
 		} else {
 			rf.debug("reduce next index for server %d", s)
-			rf.nextIndex[s]--
-			if rf.nextIndex[s] < 1 {
-				rf.nextIndex[s] = 1 // the min is 1
+			// go back to conflict log index minus one, so we are safe. but the lowest index is 1.
+			max := reply.ConflictingLogIndex-1
+			if max < 1 {
+				max = 1
 			}
+			rf.nextIndex[s] = max
 		}
 
 		rf.updateCommitIndex()
