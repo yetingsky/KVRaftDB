@@ -186,16 +186,13 @@ type RequestVoteReply struct {
 }
 
 func (rf *Raft) checkIfLogUpdateToDate(lastLogIndex int, lastLogTerm int) bool {
-	if len(rf.log) > lastLogIndex {
-		return false
-	} else if len(rf.log) == lastLogIndex {
-		_,term := rf.getLastLogEntry()
-		if term != lastLogTerm {
-			rf.debug("log length is the same, but the term is different, vote false")
-			return false
-		}
+	lastI, lastT := rf.getLastLogEntry()
+	if lastT == lastLogTerm {
+		return lastI <= lastLogIndex
+	} else {
+		return lastT <= lastLogTerm
 	}
-	return true;
+	return false;
 }
 
 //
@@ -213,6 +210,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// check if log is up-to-date
 	updateToDate := rf.checkIfLogUpdateToDate(args.LastLogIndex, args.LastLogTerm)
 
+	//log.Println(rf.me, "got vote ask", args, "updateTodate?", updateToDate, rf.log)
 	if args.Term < rf.term {
 		reply.VoteGranted = false		
 	} else if args.Term >= rf.term && updateToDate{
@@ -406,7 +404,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	
 	//rf.debug("%v", rf.log)
 
-	rf.debug("add command %v", command)
+	//rf.debug("add command %v", command)
 	return len(rf.log), rf.term, true
 }
 
@@ -445,7 +443,7 @@ func (rf *Raft) updateCommitIndex() {
 		//log.Println(rf.me, "count is", count)
 		if count > len(rf.peers)/2 {
 			rf.commitIndex = i
-			log.Println(rf.me, "peer got commit index", rf.commitIndex, "count is", count, "peer num is", len(rf.peers)/2)
+			//log.Println(rf.me, "peer got commit index", rf.commitIndex, "count is", count, "peer num is", len(rf.peers)/2)
 			break
 		}
 		i--
@@ -454,6 +452,10 @@ func (rf *Raft) updateCommitIndex() {
 }
 
 func (rf *Raft) sendAppendEntries(s int) {
+	if !rf.isLeader() {
+		return
+	}
+
 	entries := []Log{}
 	preLogIndex := 0
 	preLogTerm := 0
@@ -602,6 +604,7 @@ func (rf *Raft) beginElection() {
 				LastLogTerm : term,
 			}
 			reply := &RequestVoteReply{}
+			//log.Println(rf.me, "hi vote for me", req)
 			ok := rf.sendRequestVote(serverIndex, req, reply)
 			if ok {
 				//rf.debug("receive from server %d term %d vote %t", serverIndex, reply.Term, reply.VoteGranted)
@@ -653,14 +656,14 @@ func (rf *Raft) startLocalApplyProcess(applyChan chan ApplyMsg) {
 
 		if rf.commitIndex > 0 && rf.commitIndex > rf.lastApplied {
 			if rf.commitIndex - rf.lastApplied > 1 {
-				log.Println(rf.me, "we are ready to send commit index", rf.commitIndex, rf.log, "last applied", rf.lastApplied)
+				//log.Println(rf.me, "we are ready to send commit index", rf.commitIndex, rf.log, "last applied", rf.lastApplied)
 			}
 
 			// we need to fill the missing commit entries			
 			nextLogIndex := rf.lastApplied // next log index we want to apply
 			for nextLogIndex < rf.commitIndex {
 				if rf.commitIndex - rf.lastApplied > 1 {
-					log.Println(rf.me, "send index", nextLogIndex)
+					//log.Println(rf.me, "send index", nextLogIndex)
 				}
 
 				applyChan <- ApplyMsg {
