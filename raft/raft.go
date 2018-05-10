@@ -18,6 +18,8 @@ package raft
 //
 
 import (
+	"kvdb/labgob"
+	"bytes"
 	//"os"
 	"log"
 	"time"
@@ -112,6 +114,7 @@ func (rf *Raft) isLeader() bool {
 func (rf *Raft) turnToFollow() {
 	rf.state = Follower
 	rf.votedFor = -1
+	rf.persist()
 }
 
 // return currentTerm and whether this server
@@ -135,6 +138,14 @@ func (rf *Raft) persist() {
 	// e.Encode(rf.yyy)
 	// data := w.Bytes()
 	// rf.persister.SaveRaftState(data)
+
+	w := new(bytes.Buffer)
+	e := labgob.NewEncoder(w)
+	e.Encode(rf.term)
+	e.Encode(rf.votedFor)
+	e.Encode(rf.log)
+	data := w.Bytes()
+	rf.persister.SaveRaftState(data)
 }
 
 
@@ -158,6 +169,22 @@ func (rf *Raft) readPersist(data []byte) {
 	//   rf.xxx = xxx
 	//   rf.yyy = yyy
 	// }
+	
+	r := bytes.NewBuffer(data)
+	d := labgob.NewDecoder(r)
+	currentTerm := 0
+	votedFor := 0
+	logs := []Log{}
+	if d.Decode(&currentTerm) != nil ||
+	   d.Decode(&votedFor) != nil || 
+	   d.Decode(&logs) != nil {
+	   log.Println("Something bad is happening in decoder!")
+	} else {
+	  rf.term = currentTerm
+	  rf.votedFor = votedFor
+	  rf.log = logs
+	}
+	rf.persist()
 }
 
 
@@ -226,6 +253,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 			rf.lastHeartBeat = time.Now()
 		}		
 	}
+	rf.persist()
 }
 
 type AppendEntriesArgs struct {
@@ -269,6 +297,8 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	if rf.leaderID == args.LeaderId {
 		rf.lastHeartBeat = time.Now()
 	}
+
+	rf.persist()
 
 	//log.Println(rf.me, "receives", args, "my logs are", rf.log)
 
@@ -332,6 +362,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	} else {
 		reply.Success = false
 	}
+	rf.persist()
 }
 
 //
@@ -402,6 +433,8 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	}
 	rf.log = append(rf.log, entry)
 	
+	rf.persist()
+
 	//rf.debug("%v", rf.log)
 
 	//rf.debug("add command %v", command)
@@ -507,6 +540,7 @@ func (rf *Raft) sendAppendEntries(s int) {
 		if reply.Term > rf.term {
 			rf.term = reply.Term
 			rf.turnToFollow()
+			rf.persist()
 			return // we are out
 		}
 
@@ -558,7 +592,7 @@ func (rf *Raft) appendEntriesLoopForPeer(server int) {
 func (rf *Raft) becomeLeader() {
 	rf.state = Leader
 	rf.leaderID = rf.me
-	rf.debug("I am a leader!")
+	//rf.debug("I am a leader!")
 
 	for p := range rf.peers {
 		if p == rf.me {
@@ -590,6 +624,8 @@ func (rf *Raft) beginElection() {
 	voteCount := 1
 	cachedTerm := rf.term
 	
+	rf.persist()
+
 	for s := range rf.peers {
 		if s == rf.me {
 			continue
@@ -612,7 +648,8 @@ func (rf *Raft) beginElection() {
 				if cachedTerm == rf.term { // only process in same term
 					if reply.Term > rf.term {
 						rf.term = reply.Term
-						rf.turnToFollow()					
+						rf.turnToFollow()
+						rf.persist()				
 					} else if reply.VoteGranted {
 						voteCount++
 						if voteCount > len(rf.peers)/2 && rf.state == Candidate {
@@ -719,6 +756,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
+
 	go rf.startElectionProcess()
 	go rf.startLocalApplyProcess(applyCh)
 
