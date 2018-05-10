@@ -92,6 +92,8 @@ type Raft struct {
 	log []Log
 	nextIndex []int
 	matchIndex []int
+
+	isDecommissioned bool
 }
 
 func (rf *Raft) debug(format string, a ...interface{}) {
@@ -219,7 +221,6 @@ func (rf *Raft) checkIfLogUpdateToDate(lastLogIndex int, lastLogTerm int) bool {
 	} else {
 		return lastT <= lastLogTerm
 	}
-	return false;
 }
 
 //
@@ -237,7 +238,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// check if log is up-to-date
 	updateToDate := rf.checkIfLogUpdateToDate(args.LastLogIndex, args.LastLogTerm)
 
-	//log.Println(rf.me, "got vote ask", args, "updateTodate?", updateToDate, rf.log)
+	log.Println(rf.me, "got vote ask", args, "updateTodate?", updateToDate, rf.log)
 	if args.Term < rf.term {
 		reply.VoteGranted = false		
 	} else if args.Term >= rf.term && updateToDate{
@@ -300,7 +301,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 	rf.persist()
 
-	//log.Println(rf.me, "receives", args, "my logs are", rf.log)
+	log.Println(rf.me, "receives", args, "my logs are", rf.log)
 
 	// reply false if log not contain an entry at preLogIndex
 	if args.PreLogIndex > len(rf.log) {
@@ -353,11 +354,11 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 			rf.log = append(rf.log, args.Entries[entryIndex:]...)
 		}
 
-		//log.Println(rf.me, "request leader commit index is", args.LeaderCommit, "my commit index", rf.commitIndex, rf.log)
+		log.Println(rf.me, "request leader commit index is", args.LeaderCommit, "my commit index", rf.commitIndex, rf.log)
 		if args.LeaderCommit > rf.commitIndex {
 			rf.commitIndex = min(args.LeaderCommit, len(rf.log))
 		}
-		//log.Println(rf.me, "commit index", rf.commitIndex)
+		log.Println(rf.me, "commit index", rf.commitIndex)
 		reply.Success = true
 	} else {
 		reply.Success = false
@@ -449,6 +450,8 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 //
 func (rf *Raft) Kill() {
 	// Your code here, if desired.
+
+	rf.isDecommissioned = true
 }
 
 func (rf *Raft) updateCommitIndex() {
@@ -460,6 +463,8 @@ func (rf *Raft) updateCommitIndex() {
 		v := rf.log[i - 1]
 		count := 1
 		//log.Println(v, "i is", i, "commit index", rf.commitIndex, "every body matches", rf.matchIndex, "v term", v.Term, "my cur term", rf.term)
+
+		// a leader cannot determine commitment using log entries from older terms
 		if v.Term == rf.term && i > rf.commitIndex {
 			// check if has majority
 			// Note: this j the value, not index
@@ -476,7 +481,7 @@ func (rf *Raft) updateCommitIndex() {
 		//log.Println(rf.me, "count is", count)
 		if count > len(rf.peers)/2 {
 			rf.commitIndex = i
-			//log.Println(rf.me, "peer got commit index", rf.commitIndex, "count is", count, "peer num is", len(rf.peers)/2)
+			log.Println(rf.me, "peer got commit index", rf.commitIndex, "count is", count, "peer num is", len(rf.peers)/2)
 			break
 		}
 		i--
@@ -485,7 +490,7 @@ func (rf *Raft) updateCommitIndex() {
 }
 
 func (rf *Raft) sendAppendEntries(s int) {
-	if !rf.isLeader() {
+	if !rf.isLeader() || rf.isDecommissioned {
 		return
 	}
 
@@ -510,7 +515,7 @@ func (rf *Raft) sendAppendEntries(s int) {
 				// the current one we need to send, so from current to the end
 				entries = make([]Log, len(rf.log) - preLogIndex)
 				copy(entries, rf.log[i:])
-				//log.Println(rf.me, "mama sending entries", entries, "to", s, "my log", rf.log, "pre index", preLogIndex)
+				log.Println(rf.me, "mama sending entries", entries, "to", s, "my log", rf.log, "pre index", preLogIndex)
 				break
 			}
 		}
@@ -519,7 +524,7 @@ func (rf *Raft) sendAppendEntries(s int) {
 			// nextIndex larger than our last log index, we send heartbeat since we assume the peer is up-to-date
 			// if it is not, then they will reply false back to us, so we decrement
 			preLogIndex, preLogTerm = rf.getLastLogEntry()
-			//log.Println(rf.me, "last log index term are", preLogIndex, preLogTerm)
+			log.Println(rf.me, "last log index term are", preLogIndex, preLogTerm)
 		}		
 	}
 	
@@ -537,19 +542,25 @@ func (rf *Raft) sendAppendEntries(s int) {
 	reply := &AppendEntriesReply {}
 	ok := rf.appendEntries(s, args, reply)
 	if ok {
+		if rf.state != Leader || rf.isDecommissioned || args.Term != rf.term {
+			rf.debug("I am not leader anymore, discard response!")
+			return
+		}
+
 		if reply.Term > rf.term {
+			rf.Lock()
 			rf.term = reply.Term
 			rf.turnToFollow()
+			rf.UnLock()
 			rf.persist()
 			return // we are out
 		}
 
-		rf.Lock()
 		if reply.Success {
 			// update log
 			if len(entries) > 0 {
 				rf.matchIndex[s] = preLogIndex + len(entries)
-				rf.nextIndex[s] = rf.matchIndex[s] + 1				
+				rf.nextIndex[s] = rf.matchIndex[s] + 1
 			}	
 		} else {
 			//rf.debug("reduce next index for server %d", s)
@@ -558,9 +569,9 @@ func (rf *Raft) sendAppendEntries(s int) {
 				rf.nextIndex[s] = 1 // the min is 1
 			}
 		}
-		rf.UnLock()
-	}
-	rf.updateCommitIndex()
+
+		rf.updateCommitIndex()
+	}	
 }
 
 func (rf *Raft) appendEntriesLoopForPeer(server int) {
@@ -571,7 +582,7 @@ func (rf *Raft) appendEntriesLoopForPeer(server int) {
 
 	for {
 		rf.Lock()
-		if rf.state != Leader  {
+		if rf.state != Leader || rf.isDecommissioned {
 			ticker.Stop()
 			rf.UnLock()
 			break
@@ -592,7 +603,7 @@ func (rf *Raft) appendEntriesLoopForPeer(server int) {
 func (rf *Raft) becomeLeader() {
 	rf.state = Leader
 	rf.leaderID = rf.me
-	//rf.debug("I am a leader!")
+	rf.debug("I am a leader!")
 
 	for p := range rf.peers {
 		if p == rf.me {
@@ -640,7 +651,7 @@ func (rf *Raft) beginElection() {
 				LastLogTerm : term,
 			}
 			reply := &RequestVoteReply{}
-			//log.Println(rf.me, "hi vote for me", req)
+			log.Println(rf.me, "hi vote for me", req)
 			ok := rf.sendRequestVote(serverIndex, req, reply)
 			if ok {
 				//rf.debug("receive from server %d term %d vote %t", serverIndex, reply.Term, reply.VoteGranted)
@@ -679,18 +690,19 @@ func (rf *Raft) startElectionProcess() {
 	defer rf.UnLock()
 
 	//rf.debug("idling. am I leader? %t", rf.isLeader())
-	// Start election process if we're not a leader and the haven't received a heartbeat for `electionTimeout`
-	if rf.state != Leader && currentTime.Sub(rf.lastHeartBeat) >= rf.timeout {
-		//log.Println(rf.me, "current time", currentTime, "last hearbeat", rf.lastHeartBeat)
-		go rf.beginElection()
-	}
-	go rf.startElectionProcess()
+
+	if !rf.isDecommissioned {
+		// Start election process if we're not a leader and the haven't received a heartbeat for `electionTimeout`
+		if rf.state != Leader && currentTime.Sub(rf.lastHeartBeat) >= rf.timeout {
+			//log.Println(rf.me, "current time", currentTime, "last hearbeat", rf.lastHeartBeat)
+			go rf.beginElection()
+		}
+		go rf.startElectionProcess()
+	}	
 }
 
 func (rf *Raft) startLocalApplyProcess(applyChan chan ApplyMsg) {
 	for {
-		<-time.After(CommitApplyIdleCheckInterval)
-
 		if rf.commitIndex > 0 && rf.commitIndex > rf.lastApplied {
 			if rf.commitIndex - rf.lastApplied > 1 {
 				//log.Println(rf.me, "we are ready to send commit index", rf.commitIndex, rf.log, "last applied", rf.lastApplied)
@@ -713,6 +725,8 @@ func (rf *Raft) startLocalApplyProcess(applyChan chan ApplyMsg) {
 			}
 			
 			rf.lastApplied = rf.commitIndex
+		} else {
+			<-time.After(CommitApplyIdleCheckInterval)
 		}
 	}	
 	
