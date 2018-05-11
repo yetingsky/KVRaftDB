@@ -252,6 +252,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	} else if (rf.votedFor == -1 || args.CandidateId == rf.votedFor) && updateToDate{
 		rf.votedFor = args.CandidateId
 		reply.VoteGranted = true
+		rf.turnToFollow()
 		//rf.lastHeartBeat = time.Now()
 	} else {
 		reply.VoteGranted = false
