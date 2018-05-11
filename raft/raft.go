@@ -21,7 +21,7 @@ import (
 	"kvdb/labgob"
 	"bytes"
 	//"os"
-	"log"
+	_"log"
 	"time"
 	"sync"
 	"kvdb/labrpc"
@@ -99,8 +99,8 @@ type Raft struct {
 }
 
 func (rf *Raft) debug(format string, a ...interface{}) {
-	args := append([]interface{}{rf.me, rf.term, rf.state}, a...)
-	log.Printf("[INFO] Raft:[Id:%d|Term:%d|State:%s|] " + format, args...)
+	//args := append([]interface{}{rf.me, rf.term, rf.state}, a...)
+	//log.Printf("[INFO] Raft:[Id:%d|Term:%d|State:%s|] " + format, args...)
 }
 
 func (rf *Raft) Lock() {
@@ -182,7 +182,7 @@ func (rf *Raft) readPersist(data []byte) {
 	if d.Decode(&currentTerm) != nil ||
 	   d.Decode(&votedFor) != nil || 
 	   d.Decode(&logs) != nil {
-	   log.Println("Something bad is happening in decoder!")
+	   //log.Println("Something bad is happening in decoder!")
 	} else {
 	  rf.term = currentTerm
 	  rf.votedFor = votedFor
@@ -307,7 +307,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		rf.lastHeartBeat = time.Now()
 	}
 
-	log.Println(rf.me, "receives", args, "my logs are", rf.log)
+	//log.Println(rf.me, "receives", args, "my logs are", rf.log)
 
 	// reply false if log not contain an entry at preLogIndex
 	/*if args.PreLogIndex > len(rf.log) {
@@ -353,7 +353,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 			} else {
 				// test code
 				if rf.log[i].Cmd != args.Entries[entryIndex].Cmd {
-					log.Println("what what?")
+					//log.Println("what what?")
 					rf.log[i].Cmd = args.Entries[entryIndex].Cmd
 				}				
 				
@@ -366,11 +366,11 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 			rf.log = append(rf.log, args.Entries[entryIndex:]...)
 		}
 
-		log.Println(rf.me, "request leader commit index is", args.LeaderCommit, "my commit index", rf.commitIndex, rf.log)
+		//log.Println(rf.me, "request leader commit index is", args.LeaderCommit, "my commit index", rf.commitIndex, rf.log)
 		if args.LeaderCommit > rf.commitIndex {
 			rf.commitIndex = min(args.LeaderCommit, len(rf.log))
 		}
-		log.Println(rf.me, "commit index", rf.commitIndex)
+		//log.Println(rf.me, "commit index", rf.commitIndex)
 		reply.Success = true
 	} else {
 		// When rejecting AppendEntries, followers include the term of the conflicting entry,
@@ -462,7 +462,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	
 	rf.persist()
 
-	rf.debug("add command %v", command)
+	//rf.debug("add command %v", command)
 	return len(rf.log), rf.term, true
 }
 
@@ -504,7 +504,7 @@ func (rf *Raft) updateCommitIndex() {
 		}
 		if count > len(rf.peers)/2 {
 			rf.commitIndex = i
-			log.Println(rf.me, "peer got commit index", rf.commitIndex, "count is", count, "peer num is", len(rf.peers)/2)
+			//log.Println(rf.me, "peer got commit index", rf.commitIndex, "count is", count, "peer num is", len(rf.peers)/2)
 			break
 		}
 		i--
@@ -635,7 +635,7 @@ func (rf *Raft) appendEntriesLoopForPeer(server int, sendAppendChan chan struct{
 func (rf *Raft) becomeLeader() {
 	rf.state = Leader
 	rf.leaderID = rf.me
-	rf.debug("I am a leader!")
+	//rf.debug("I am a leader!")
 
 	rf.sendAppendChan = make([]chan struct{}, len(rf.peers))
 
@@ -687,7 +687,7 @@ func (rf *Raft) beginElection() {
 				LastLogTerm : term,
 			}
 			reply := &RequestVoteReply{}
-			log.Println(rf.me, "hi vote for me", req)
+			//log.Println(rf.me, "hi vote for me", req)
 			ok := rf.sendRequestVote(serverIndex, req, reply)
 			if ok {
 				rf.debug("receive from server %d term %d vote %t", serverIndex, reply.Term, reply.VoteGranted)
@@ -740,7 +740,7 @@ func (rf *Raft) startLocalApplyProcess(applyChan chan ApplyMsg) {
 	for {
 		if rf.commitIndex >= 0 && rf.commitIndex > rf.lastApplied && !rf.isDecommissioned {
 			if rf.commitIndex - rf.lastApplied > 1 {
-				log.Println(rf.me, "we are ready to send commit index", rf.commitIndex, rf.log, "last applied", rf.lastApplied)
+				//log.Println(rf.me, "we are ready to send commit index", rf.commitIndex, rf.log, "last applied", rf.lastApplied)
 			}
 
 			// we need to fill the missing commit entries			
