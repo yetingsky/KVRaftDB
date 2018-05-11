@@ -18,18 +18,14 @@ package raft
 //
 
 import (
+	"log"
 	"kvdb/labgob"
 	"bytes"
-	//"os"
-	//"log"
 	"time"
 	"sync"
 	"kvdb/labrpc"
 	"math/rand"
 )
-
-// import "bytes"
-// import "labgob"
 
 
 const HeartBeatInterval = 95 * time.Millisecond
@@ -192,8 +188,6 @@ func (rf *Raft) readPersist(data []byte) {
 }
 
 
-
-
 //
 // example RequestVote RPC arguments structure.
 // field names must start with capital letters!
@@ -246,7 +240,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		if args.Term == rf.term {
 			if rf.votedFor != -1 && rf.votedFor != args.CandidateId {
 				// we have voted someone else this term, we cannot vote you
-				//log.Println("Sorry, we cannot vote")
+				log.Println("Sorry, we cannot vote")
 				reply.VoteGranted = false
 			}
 		} else {
@@ -255,13 +249,10 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 			reply.VoteGranted = true
 			rf.votedFor = args.CandidateId
 		}
-		
-		//rf.lastHeartBeat = time.Now()
 	} else if (rf.votedFor == -1 || args.CandidateId == rf.votedFor) && updateToDate {
 		rf.votedFor = args.CandidateId
 		reply.VoteGranted = true
 		rf.turnToFollow()
-		//rf.lastHeartBeat = time.Now()
 	} else {
 		reply.VoteGranted = false
 	}
