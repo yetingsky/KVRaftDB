@@ -18,11 +18,10 @@ package raft
 //
 
 import (
-	"log"
 	"kvdb/labgob"
 	"bytes"
 	//"os"
-	_"log"
+	//"log"
 	"time"
 	"sync"
 	"kvdb/labrpc"
@@ -100,8 +99,8 @@ type Raft struct {
 }
 
 func (rf *Raft) debug(format string, a ...interface{}) {
-	args := append([]interface{}{rf.me, rf.term, rf.state}, a...)
-	log.Printf("[INFO] Raft:[Id:%d|Term:%d|State:%s|] " + format, args...)
+	//args := append([]interface{}{rf.me, rf.term, rf.state}, a...)
+	//log.Printf("[INFO] Raft:[Id:%d|Term:%d|State:%s|] " + format, args...)
 }
 
 func (rf *Raft) Lock() {
@@ -243,13 +242,22 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 
 	if args.Term < rf.term {
 		reply.VoteGranted = false		
-	} else if args.Term >= rf.term && updateToDate{
-		rf.turnToFollow()
-		rf.term = args.Term
-		reply.VoteGranted = true
-		rf.votedFor = args.CandidateId
+	} else if args.Term >= rf.term && updateToDate {
+		if args.Term == rf.term {
+			if rf.votedFor != -1 && rf.votedFor != args.CandidateId {
+				// we have voted someone else this term, we cannot vote you
+				//log.Println("Sorry, we cannot vote")
+				reply.VoteGranted = false
+			}
+		} else {
+			rf.turnToFollow()
+			rf.term = args.Term
+			reply.VoteGranted = true
+			rf.votedFor = args.CandidateId
+		}
+		
 		//rf.lastHeartBeat = time.Now()
-	} else if (rf.votedFor == -1 || args.CandidateId == rf.votedFor) && updateToDate{
+	} else if (rf.votedFor == -1 || args.CandidateId == rf.votedFor) && updateToDate {
 		rf.votedFor = args.CandidateId
 		reply.VoteGranted = true
 		rf.turnToFollow()
@@ -258,8 +266,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		reply.VoteGranted = false
 	}
 
-	log.Println(rf.me, "got vote ask", args, "updateTodate?", updateToDate, "my term is", rf.term, "my voted is to", rf.votedFor, "did I vote?", 
-		reply.VoteGranted, rf.log)
+	//log.Println(rf.me, "got vote ask", args, "updateTodate?", updateToDate, "my term is", rf.term, "my voted is to", rf.votedFor, "did I vote?", reply.VoteGranted, rf.log)
 	rf.persist()
 }
 
@@ -311,7 +318,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		rf.lastHeartBeat = time.Now()
 	}
 
-	log.Println(rf.me, "receives", args, "my logs are", rf.log)
+	//log.Println(rf.me, "receives", args, "my logs are", rf.log)
 
 	// reply false if log not contain an entry at preLogIndex
 	/*if args.PreLogIndex > len(rf.log) {
@@ -370,11 +377,11 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 			rf.log = append(rf.log, args.Entries[entryIndex:]...)
 		}
 
-		log.Println(rf.me, "request leader commit index is", args.LeaderCommit, "my commit index", rf.commitIndex, rf.log)
+		//log.Println(rf.me, "request leader commit index is", args.LeaderCommit, "my commit index", rf.commitIndex, rf.log)
 		if args.LeaderCommit > rf.commitIndex {
 			rf.commitIndex = min(args.LeaderCommit, len(rf.log))
 		}
-		log.Println(rf.me, "commit index", rf.commitIndex)
+		//log.Println(rf.me, "commit index", rf.commitIndex)
 		reply.Success = true
 	} else {
 		// When rejecting AppendEntries, followers include the term of the conflicting entry,
@@ -466,7 +473,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	
 	rf.persist()
 
-	rf.debug("add command %v", command)
+	//rf.debug("add command %v", command)
 	return len(rf.log), rf.term, true
 }
 
@@ -510,7 +517,7 @@ func (rf *Raft) updateCommitIndex() {
 		}
 		if count > len(rf.peers)/2 {
 			rf.commitIndex = i
-			log.Println(rf.me, "peer got commit index", rf.commitIndex, "count is", count, "peer num is", len(rf.peers)/2)
+			//log.Println(rf.me, "peer got commit index", rf.commitIndex, "count is", count, "peer num is", len(rf.peers)/2)
 			break
 		}
 		i--
@@ -564,7 +571,7 @@ func (rf *Raft) sendAppendEntries(s int, sendAppendChan chan struct{}) {
 		Entries : entries,
 		LeaderCommit : rf.commitIndex,
 	}	
-	log.Println(rf.me, "send append entries args to peer", s, "args are:", args, "my logs", rf.log)
+	//log.Println(rf.me, "send append entries args to peer", s, "args are:", args, "my logs", rf.log)
 
 	rf.UnLock()
 
@@ -696,7 +703,7 @@ func (rf *Raft) beginElection() {
 				LastLogTerm : term,
 			}
 			reply := &RequestVoteReply{}
-			log.Println(rf.me, "hi vote for me", req)
+			//log.Println(rf.me, "hi vote for me", req)
 			ok := rf.sendRequestVote(serverIndex, req, reply)
 			if ok {
 				rf.debug("receive from server %d term %d vote %t", serverIndex, reply.Term, reply.VoteGranted)
@@ -727,7 +734,7 @@ func (rf *Raft) beginElection() {
 
 func (rf *Raft) startElectionProcess() {
 	electionTimeout := func() time.Duration { // Randomized timeouts between [500, 600)-ms
-		return (250 + time.Duration(rand.Intn(250))) * time.Millisecond
+		return (200 + time.Duration(rand.Intn(300))) * time.Millisecond
 	}
 
 	rf.timeout = electionTimeout()
