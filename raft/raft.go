@@ -32,7 +32,7 @@ import (
 // import "labgob"
 
 
-const HeartBeatInterval = 60 * time.Millisecond
+const HeartBeatInterval = 95 * time.Millisecond
 const CommitApplyIdleCheckInterval = 15 * time.Millisecond
 const LeaderPeerTickInterval = 10 * time.Millisecond
 
@@ -94,6 +94,8 @@ type Raft struct {
 	matchIndex []int
 
 	isDecommissioned bool
+
+	sendAppendChan []chan struct{}
 }
 
 func (rf *Raft) debug(format string, a ...interface{}) {
@@ -509,7 +511,7 @@ func (rf *Raft) updateCommitIndex() {
 	}
 }
 
-func (rf *Raft) sendAppendEntries(s int) {
+func (rf *Raft) sendAppendEntries(s int, sendAppendChan chan struct{}) {
 	if !rf.isLeader() || rf.isDecommissioned {
 		return
 	}
@@ -535,7 +537,7 @@ func (rf *Raft) sendAppendEntries(s int) {
 				// the current one we need to send, so from current to the end
 				entries = make([]Log, len(rf.log) - preLogIndex)
 				copy(entries, rf.log[i:])
-				log.Println(rf.me, "mama sending entries", entries, "to", s, "my log", rf.log, "pre index", preLogIndex)
+				//log.Println(rf.me, "mama sending entries", entries, "to", s, "my log", rf.log, "pre index", preLogIndex)
 				break
 			}
 		}
@@ -544,7 +546,7 @@ func (rf *Raft) sendAppendEntries(s int) {
 			// nextIndex larger than our last log index, we send heartbeat since we assume the peer is up-to-date
 			// if it is not, then they will reply false back to us, so we decrement
 			preLogIndex, preLogTerm = rf.getLastLogEntry()
-			log.Println(rf.me, "last log index term are", preLogIndex, preLogTerm)
+			//log.Println(rf.me, "last log index term are", preLogIndex, preLogTerm)
 		}		
 	}
 	
@@ -556,7 +558,7 @@ func (rf *Raft) sendAppendEntries(s int) {
 		Entries : entries,
 		LeaderCommit : rf.commitIndex,
 	}	
-	log.Println(rf.me, "send append entries args to peer", s, "args are:", args)
+	//log.Println(rf.me, "send append entries args to peer", s, "args are:", args)
 
 	rf.UnLock()
 
@@ -592,6 +594,8 @@ func (rf *Raft) sendAppendEntries(s int) {
 			}
 			rf.nextIndex[s] = max
 			//log.Println(rf.me, "all next indexes are", rf.nextIndex, "my logs", rf.log)
+
+			sendAppendChan <- struct{}{}
 		}
 
 		rf.updateCommitIndex()
@@ -599,10 +603,10 @@ func (rf *Raft) sendAppendEntries(s int) {
 	rf.persist()
 }
 
-func (rf *Raft) appendEntriesLoopForPeer(server int) {
+func (rf *Raft) appendEntriesLoopForPeer(server int, sendAppendChan chan struct{}) {
 	ticker := time.NewTicker(LeaderPeerTickInterval)
 
-	rf.sendAppendEntries(server)
+	rf.sendAppendEntries(server, sendAppendChan)
 	lastEntrySent := time.Now()
 
 	for {
@@ -615,11 +619,14 @@ func (rf *Raft) appendEntriesLoopForPeer(server int) {
 		rf.UnLock()
 
 		select {
+		case <-sendAppendChan: // Signal that we should send a new append to this peer
+			lastEntrySent = time.Now()
+			go rf.sendAppendEntries(server, sendAppendChan)
 		case currentTime := <-ticker.C: 
 			if currentTime.Sub(lastEntrySent) >= HeartBeatInterval {
 				lastEntrySent = time.Now()
 				// we fire and contine, otherwise the loop stuck if the peer no responding
-				go rf.sendAppendEntries(server)
+				go rf.sendAppendEntries(server, sendAppendChan)
 			}
 		}
 	}
@@ -630,6 +637,8 @@ func (rf *Raft) becomeLeader() {
 	rf.leaderID = rf.me
 	rf.debug("I am a leader!")
 
+	rf.sendAppendChan = make([]chan struct{}, len(rf.peers))
+
 	for p := range rf.peers {
 		if p == rf.me {
 			continue
@@ -637,8 +646,9 @@ func (rf *Raft) becomeLeader() {
 		
 		rf.nextIndex[p] = len(rf.log) + 1 // Should be initialized to leader's last log index + 1
 		rf.matchIndex[p] = 0              // Index of highest log entry known to be replicated on server
-
-		go rf.appendEntriesLoopForPeer(p)
+		rf.sendAppendChan[p] = make(chan struct{}, 1)
+		
+		go rf.appendEntriesLoopForPeer(p, rf.sendAppendChan[p])
 	}
 }
 
