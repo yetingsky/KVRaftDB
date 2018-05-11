@@ -18,7 +18,7 @@ package raft
 //
 
 import (
-	//"log"
+	"log"
 	"kvdb/labgob"
 	"bytes"
 	"time"
@@ -95,8 +95,8 @@ type Raft struct {
 }
 
 func (rf *Raft) debug(format string, a ...interface{}) {
-	//args := append([]interface{}{rf.me, rf.term, rf.state}, a...)
-	//log.Printf("[INFO] Raft:[Id:%d|Term:%d|State:%s|] " + format, args...)
+	args := append([]interface{}{rf.me, rf.term, rf.state}, a...)
+	log.Printf("[INFO] Raft:[Id:%d|Term:%d|State:%s|] " + format, args...)
 }
 
 func (rf *Raft) Lock() {
@@ -245,12 +245,11 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	} else if (rf.votedFor == -1 || args.CandidateId == rf.votedFor) && updateToDate {
 		rf.votedFor = args.CandidateId
 		reply.VoteGranted = true
-		rf.turnToFollow()
 	} else {
 		reply.VoteGranted = false
 	}
 
-	//log.Println(rf.me, "got vote ask", args, "updateTodate?", updateToDate, "my term is", rf.term, "my voted is to", rf.votedFor, "did I vote?", reply.VoteGranted, rf.log)
+	log.Println(rf.me, "got vote ask", args, "updateTodate?", updateToDate, "my term is", rf.term, "my voted is to", rf.votedFor, "did I vote?", reply.VoteGranted, rf.log)
 	rf.persist()
 }
 
@@ -302,16 +301,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		rf.lastHeartBeat = time.Now()
 	}
 
-	//log.Println(rf.me, "receives", args, "my logs are", rf.log)
-
-	// reply false if log not contain an entry at preLogIndex
-	/*if args.PreLogIndex > len(rf.log) {
-		reply.Success = false
-		return
-	} else if args.PreLogIndex-1 >= 0 && rf.log[args.PreLogIndex-1].Term != args.PreLogTerm {
-		reply.Success = false
-		return
-	}*/
+	log.Println(rf.me, "receives", args, "my logs are", rf.log)
 
 	// find previous index
 	// Note: preIndex is -1 in two cases:
@@ -361,11 +351,11 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 			rf.log = append(rf.log, args.Entries[entryIndex:]...)
 		}
 
-		//log.Println(rf.me, "request leader commit index is", args.LeaderCommit, "my commit index", rf.commitIndex, rf.log)
+		log.Println(rf.me, "request leader commit index is", args.LeaderCommit, "my commit index", rf.commitIndex, rf.log)
 		if args.LeaderCommit > rf.commitIndex {
 			rf.commitIndex = min(args.LeaderCommit, len(rf.log))
 		}
-		//log.Println(rf.me, "commit index", rf.commitIndex)
+		log.Println(rf.me, "commit index", rf.commitIndex)
 		reply.Success = true
 	} else {
 		// When rejecting AppendEntries, followers include the term of the conflicting entry,
@@ -501,7 +491,7 @@ func (rf *Raft) updateCommitIndex() {
 		}
 		if count > len(rf.peers)/2 {
 			rf.commitIndex = i
-			//log.Println(rf.me, "peer got commit index", rf.commitIndex, "count is", count, "peer num is", len(rf.peers)/2)
+			log.Println(rf.me, "peer got commit index", rf.commitIndex, "count is", count, "peer num is", len(rf.peers)/2)
 			break
 		}
 		i--
@@ -555,7 +545,7 @@ func (rf *Raft) sendAppendEntries(s int, sendAppendChan chan struct{}) {
 		Entries : entries,
 		LeaderCommit : rf.commitIndex,
 	}	
-	//log.Println(rf.me, "send append entries args to peer", s, "args are:", args, "my logs", rf.log)
+	log.Println(rf.me, "send append entries args to peer", s, "args are:", args, "my logs", rf.log)
 
 	rf.UnLock()
 
@@ -571,8 +561,8 @@ func (rf *Raft) sendAppendEntries(s int, sendAppendChan chan struct{}) {
 			rf.Lock()
 			rf.term = reply.Term
 			rf.turnToFollow()
-			rf.UnLock()
 			rf.persist()
+			rf.UnLock()
 			return // we are out
 		}
 
@@ -635,8 +625,10 @@ func (rf *Raft) appendEntriesLoopForPeer(server int, sendAppendChan chan struct{
 func (rf *Raft) becomeLeader() {
 	rf.state = Leader
 	rf.leaderID = rf.me
-	//rf.debug("I am a leader!")
+	rf.debug("I am a leader!")
 
+	rf.nextIndex = make([]int, len(rf.peers))
+	rf.matchIndex = make([]int, len(rf.peers))
 	rf.sendAppendChan = make([]chan struct{}, len(rf.peers))
 
 	for p := range rf.peers {
@@ -687,7 +679,7 @@ func (rf *Raft) beginElection() {
 				LastLogTerm : term,
 			}
 			reply := &RequestVoteReply{}
-			//log.Println(rf.me, "hi vote for me", req)
+			log.Println(rf.me, "hi vote for me", req)
 			ok := rf.sendRequestVote(serverIndex, req, reply)
 			if ok {
 				rf.debug("receive from server %d term %d vote %t", serverIndex, reply.Term, reply.VoteGranted)
@@ -797,14 +789,6 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.commitIndex = 0
 	rf.lastApplied = 0
 	rf.log = []Log{}
-
-	rf.nextIndex = make([]int, len(rf.peers))
-	// initialized to leader last log index + 1
-	logIndexInit := len(rf.log) + 1
-	for i := range rf.nextIndex {
-		rf.nextIndex[i] = logIndexInit
-	}
-	rf.matchIndex = make([]int, len(rf.peers)) // init to 0
 
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
