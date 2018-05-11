@@ -32,8 +32,8 @@ import (
 // import "labgob"
 
 
-const HeartBeatInterval = 80 * time.Millisecond
-const CommitApplyIdleCheckInterval = 10 * time.Millisecond
+const HeartBeatInterval = 60 * time.Millisecond
+const CommitApplyIdleCheckInterval = 15 * time.Millisecond
 const LeaderPeerTickInterval = 10 * time.Millisecond
 
 //
@@ -238,7 +238,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// check if log is up-to-date
 	updateToDate := rf.checkIfLogUpdateToDate(args.LastLogIndex, args.LastLogTerm)
 
-	log.Println(rf.me, "got vote ask", args, "updateTodate?", updateToDate, rf.log)
+	//log.Println(rf.me, "got vote ask", args, "updateTodate?", updateToDate, rf.log)
 	if args.Term < rf.term {
 		reply.VoteGranted = false		
 	} else if args.Term >= rf.term && updateToDate{
@@ -262,6 +262,7 @@ type AppendEntriesArgs struct {
 	LeaderId int
 	PreLogIndex int
 	PreLogTerm int
+
 	// entries
 	Entries []Log
 	LeaderCommit int
@@ -284,6 +285,9 @@ func min(a, b int) int {
 func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
 	// Your code here (2A, 2B).
 	//rf.debug("receive append entry from leader %d", args.LeaderId)
+	rf.Lock()
+	defer rf.UnLock()
+
 	reply.Term = rf.term
 	if rf.isLeader() {
 		//rf.debug("I am a leader, why some dude gives me entry??????? %d", args.Term)
@@ -301,9 +305,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		rf.lastHeartBeat = time.Now()
 	}
 
-	rf.persist()
-
-	//log.Println(rf.me, "receives", args, "my logs are", rf.log)
+	log.Println(rf.me, "receives", args, "my logs are", rf.log)
 
 	// reply false if log not contain an entry at preLogIndex
 	/*if args.PreLogIndex > len(rf.log) {
@@ -313,9 +315,6 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		reply.Success = false
 		return
 	}*/
-	
-	rf.Lock()
-	defer rf.UnLock()
 
 	// find previous index
 	// Note: preIndex is -1 in two cases:
@@ -324,8 +323,8 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	preIndex := -1
 	for i, v := range rf.log {
 		if v.Index == args.PreLogIndex {
-			if v.Term == args.PreLogTerm {
-				preIndex = i
+			if v.Term == args.PreLogTerm {				
+				preIndex = i			
 				break
 			} else {
 				// now we have the conflict term
@@ -350,6 +349,12 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 				rf.log = rf.log[:i]
 				break;
 			} else {
+				// test code
+				if rf.log[i].Cmd != args.Entries[entryIndex].Cmd {
+					log.Println("what what?")
+					rf.log[i].Cmd = args.Entries[entryIndex].Cmd
+				}				
+				
 				entryIndex++
 			}
 		}
@@ -455,9 +460,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	
 	rf.persist()
 
-	//rf.debug("%v", rf.log)
-
-	//rf.debug("add command %v", command)
+	rf.debug("add command %v", command)
 	return len(rf.log), rf.term, true
 }
 
@@ -497,7 +500,6 @@ func (rf *Raft) updateCommitIndex() {
 				}
 			}
 		}
-		//log.Println(rf.me, "count is", count)
 		if count > len(rf.peers)/2 {
 			rf.commitIndex = i
 			log.Println(rf.me, "peer got commit index", rf.commitIndex, "count is", count, "peer num is", len(rf.peers)/2)
@@ -505,7 +507,6 @@ func (rf *Raft) updateCommitIndex() {
 		}
 		i--
 	}
-	//log.Println(rf.me, "match indexes are", rf.matchIndex)
 }
 
 func (rf *Raft) sendAppendEntries(s int) {
@@ -555,14 +556,15 @@ func (rf *Raft) sendAppendEntries(s int) {
 		Entries : entries,
 		LeaderCommit : rf.commitIndex,
 	}	
-	
+	log.Println(rf.me, "send append entries args to peer", s, "args are:", args)
+
 	rf.UnLock()
 
 	reply := &AppendEntriesReply {}
 	ok := rf.appendEntries(s, args, reply)
 	if ok {
 		if rf.state != Leader || rf.isDecommissioned || args.Term != rf.term {
-			rf.debug("I am not leader anymore, discard response!")
+			//rf.debug("I am not leader anymore, discard response!")
 			return
 		}
 
@@ -582,17 +584,19 @@ func (rf *Raft) sendAppendEntries(s int) {
 				rf.nextIndex[s] = rf.matchIndex[s] + 1
 			}	
 		} else {
-			rf.debug("reduce next index for server %d", s)
+			//rf.debug("reduce next index for server %d", s)
 			// go back to conflict log index minus one, so we are safe. but the lowest index is 1.
 			max := reply.ConflictingLogIndex-1
 			if max < 1 {
 				max = 1
 			}
 			rf.nextIndex[s] = max
+			//log.Println(rf.me, "all next indexes are", rf.nextIndex, "my logs", rf.log)
 		}
 
 		rf.updateCommitIndex()
 	}	
+	rf.persist()
 }
 
 func (rf *Raft) appendEntriesLoopForPeer(server int) {
@@ -648,15 +652,16 @@ func (rf *Raft) getLastLogEntry() (int,int) {
 }
 
 func (rf *Raft) beginElection() {
-	//rf.debug("about to elect myself")
+	rf.Lock()
 	rf.state = Candidate
 	rf.term++
 	rf.votedFor = rf.me	
 
 	voteCount := 1
 	cachedTerm := rf.term
-	
+
 	rf.persist()
+	rf.UnLock()
 
 	for s := range rf.peers {
 		if s == rf.me {
@@ -675,13 +680,15 @@ func (rf *Raft) beginElection() {
 			log.Println(rf.me, "hi vote for me", req)
 			ok := rf.sendRequestVote(serverIndex, req, reply)
 			if ok {
-				//rf.debug("receive from server %d term %d vote %t", serverIndex, reply.Term, reply.VoteGranted)
+				rf.debug("receive from server %d term %d vote %t", serverIndex, reply.Term, reply.VoteGranted)
 
 				if cachedTerm == rf.term { // only process in same term
 					if reply.Term > rf.term {
+						rf.Lock()
 						rf.term = reply.Term
 						rf.turnToFollow()
-						rf.persist()				
+						rf.persist()		
+						rf.UnLock()		
 					} else if reply.VoteGranted {
 						voteCount++
 						if voteCount > len(rf.peers)/2 && rf.state == Candidate {
@@ -701,7 +708,7 @@ func (rf *Raft) beginElection() {
 
 func (rf *Raft) startElectionProcess() {
 	electionTimeout := func() time.Duration { // Randomized timeouts between [500, 600)-ms
-		return (200 + time.Duration(rand.Intn(200))) * time.Millisecond
+		return (200 + time.Duration(rand.Intn(300))) * time.Millisecond
 	}
 
 	rf.timeout = electionTimeout()
@@ -710,12 +717,9 @@ func (rf *Raft) startElectionProcess() {
 	rf.Lock()
 	defer rf.UnLock()
 
-	//rf.debug("idling. am I leader? %t", rf.isLeader())
-
 	if !rf.isDecommissioned {
 		// Start election process if we're not a leader and the haven't received a heartbeat for `electionTimeout`
 		if rf.state != Leader && currentTime.Sub(rf.lastHeartBeat) >= rf.timeout {
-			//log.Println(rf.me, "current time", currentTime, "last hearbeat", rf.lastHeartBeat)
 			go rf.beginElection()
 		}
 		go rf.startElectionProcess()
@@ -724,15 +728,16 @@ func (rf *Raft) startElectionProcess() {
 
 func (rf *Raft) startLocalApplyProcess(applyChan chan ApplyMsg) {
 	for {
-		if rf.commitIndex > 0 && rf.commitIndex > rf.lastApplied {
+		if rf.commitIndex >= 0 && rf.commitIndex > rf.lastApplied && !rf.isDecommissioned {
 			if rf.commitIndex - rf.lastApplied > 1 {
-				//log.Println(rf.me, "we are ready to send commit index", rf.commitIndex, rf.log, "last applied", rf.lastApplied)
+				log.Println(rf.me, "we are ready to send commit index", rf.commitIndex, rf.log, "last applied", rf.lastApplied)
 			}
 
 			// we need to fill the missing commit entries			
 			nextLogIndex := rf.lastApplied // next log index we want to apply
-			for nextLogIndex < rf.commitIndex {
-				if rf.commitIndex - rf.lastApplied > 1 {
+			cachedCommitIndex := rf.commitIndex
+			for nextLogIndex < cachedCommitIndex {
+				if cachedCommitIndex - rf.lastApplied > 1 {
 					//log.Println(rf.me, "send index", nextLogIndex)
 				}
 
@@ -745,7 +750,9 @@ func (rf *Raft) startLocalApplyProcess(applyChan chan ApplyMsg) {
 				nextLogIndex++
 			}
 			
-			rf.lastApplied = rf.commitIndex
+			rf.Lock()
+			rf.lastApplied = cachedCommitIndex
+			rf.UnLock()
 		} else {
 			<-time.After(CommitApplyIdleCheckInterval)
 		}
