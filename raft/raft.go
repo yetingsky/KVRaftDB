@@ -28,7 +28,7 @@ import (
 )
 
 
-const HeartBeatInterval = 60 * time.Millisecond
+const HeartBeatInterval = 50 * time.Millisecond
 const CommitApplyIdleCheckInterval = 15 * time.Millisecond
 const LeaderPeerTickInterval = 10 * time.Millisecond
 
@@ -231,23 +231,20 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 
 	reply.Term = rf.term
 
+	if args.Term > rf.term {
+		rf.turnToFollow()
+		rf.term = args.Term
+	}
+
 	// check if log is up-to-date
 	updateToDate := rf.checkIfLogUpdateToDate(args.LastLogIndex, args.LastLogTerm)
 
 	if args.Term < rf.term {
 		reply.VoteGranted = false		
-	} else if args.Term >= rf.term && updateToDate {
-		// of course I will vote for you no matter what
-		rf.turnToFollow()
-		rf.term = args.Term
-		reply.VoteGranted = true
-		rf.votedFor = args.CandidateId
 	} else if (rf.votedFor == -1 || args.CandidateId == rf.votedFor) && updateToDate {
 		rf.votedFor = args.CandidateId
 		reply.VoteGranted = true
-	} else {
-		reply.VoteGranted = false
-	}
+	} 
 
 	log.Println(rf.me, "got vote ask", args, "updateTodate?", updateToDate, "my term is", rf.term, "my voted is to", rf.votedFor, "did I vote?", reply.VoteGranted, rf.log)
 	rf.persist()
@@ -447,7 +444,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	
 	rf.persist()
 
-	//rf.debug("add command %v", command)
+	rf.debug("add command %v", command)
 	return len(rf.log), rf.term, true
 }
 
@@ -499,7 +496,9 @@ func (rf *Raft) updateCommitIndex() {
 }
 
 func (rf *Raft) sendAppendEntries(s int, sendAppendChan chan struct{}) {
+	rf.Lock()
 	if !rf.isLeader() || rf.isDecommissioned {
+		rf.UnLock()
 		return
 	}
 
@@ -508,7 +507,6 @@ func (rf *Raft) sendAppendEntries(s int, sendAppendChan chan struct{}) {
 	preLogTerm := 0
 	lastLogIndex,_ := rf.getLastLogEntry()
 
-	rf.Lock()
 	// if we have log entry, and our logs contain nextIndex[s]
 	if lastLogIndex > 0 && lastLogIndex >= rf.nextIndex[s] {
 		// send all missing entries!
@@ -581,7 +579,6 @@ func (rf *Raft) sendAppendEntries(s int, sendAppendChan chan struct{}) {
 			}
 			rf.nextIndex[s] = max
 			//log.Println(rf.me, "all next indexes are", rf.nextIndex, "my logs", rf.log)
-
 			sendAppendChan <- struct{}{}
 		}
 
@@ -662,6 +659,14 @@ func (rf *Raft) beginElection() {
 	voteCount := 1
 	cachedTerm := rf.term
 
+	index, term := rf.getLastLogEntry()
+	req := &RequestVoteArgs{
+		Term : cachedTerm,
+		CandidateId : rf.me,
+		LastLogIndex : index,
+		LastLogTerm : term,
+	}
+
 	rf.persist()
 	rf.UnLock()
 
@@ -670,39 +675,29 @@ func (rf *Raft) beginElection() {
 			continue
 		}	
 		
-		go func(serverIndex int) {
-			index, term := rf.getLastLogEntry()
-			req := &RequestVoteArgs{
-				Term : cachedTerm,
-				CandidateId : rf.me,
-				LastLogIndex : index,
-				LastLogTerm : term,
-			}
+		go func(serverIndex int) {			
 			reply := &RequestVoteReply{}
 			log.Println(rf.me, "hi vote for me", req)
 			ok := rf.sendRequestVote(serverIndex, req, reply)
 			if ok {
 				rf.debug("receive from server %d term %d vote %t", serverIndex, reply.Term, reply.VoteGranted)
 
-				if cachedTerm == rf.term { // only process in same term
-					if reply.Term > rf.term {
-						rf.Lock()
-						rf.term = reply.Term
-						rf.turnToFollow()
-						rf.persist()		
-						rf.UnLock()		
-					} else if reply.VoteGranted {
+				if reply.Term > rf.term {
+					rf.Lock()
+					rf.term = reply.Term
+					rf.turnToFollow()
+					rf.persist()		
+					rf.UnLock()		
+				} else if cachedTerm == rf.term { // only process in same term
+					if reply.VoteGranted {
 						voteCount++
 						if voteCount > len(rf.peers)/2 && rf.state == Candidate {
 							rf.state = Leader
 							go rf.becomeLeader()
 						}
 					}
-				}
-				
-			} else {
-				//rf.debug("why not ok for votes")
-			}			
+				}				
+			}		
 		}(s)
 		
 	}	
@@ -710,7 +705,7 @@ func (rf *Raft) beginElection() {
 
 func (rf *Raft) startElectionProcess() {
 	electionTimeout := func() time.Duration { // Randomized timeouts between [500, 600)-ms
-		return (200 + time.Duration(rand.Intn(300))) * time.Millisecond
+		return (300 + time.Duration(rand.Intn(100))) * time.Millisecond
 	}
 
 	rf.timeout = electionTimeout()
