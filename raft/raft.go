@@ -28,7 +28,7 @@ import (
 )
 
 
-const HeartBeatInterval = 50 * time.Millisecond
+const HeartBeatInterval = 90 * time.Millisecond
 const CommitApplyIdleCheckInterval = 15 * time.Millisecond
 const LeaderPeerTickInterval = 10 * time.Millisecond
 
@@ -231,13 +231,16 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 
 	reply.Term = rf.term
 
+	// check if log is up-to-date
+	updateToDate := rf.checkIfLogUpdateToDate(args.LastLogIndex, args.LastLogTerm)
+
 	if args.Term > rf.term {
 		rf.turnToFollow()
 		rf.term = args.Term
 	}
 
-	// check if log is up-to-date
-	updateToDate := rf.checkIfLogUpdateToDate(args.LastLogIndex, args.LastLogTerm)
+	log.Println(rf.me, "before got vote ask", args, "updateTodate?", updateToDate, "my term is", rf.term, "my voted is to", rf.votedFor, "did I vote?", reply.VoteGranted, rf.log)
+
 
 	if args.Term < rf.term {
 		reply.VoteGranted = false		
@@ -246,7 +249,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		reply.VoteGranted = true
 	} 
 
-	log.Println(rf.me, "got vote ask", args, "updateTodate?", updateToDate, "my term is", rf.term, "my voted is to", rf.votedFor, "did I vote?", reply.VoteGranted, rf.log)
+	log.Println(rf.me, "after got vote ask", args, "updateTodate?", updateToDate, "my term is", rf.term, "my voted is to", rf.votedFor, "did I vote?", reply.VoteGranted, rf.log)
 	rf.persist()
 }
 
@@ -282,16 +285,21 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	defer rf.UnLock()
 
 	reply.Term = rf.term
-	if rf.isLeader() {
-		//rf.debug("I am a leader, why some dude gives me entry??????? %d", args.Term)
-	}
+
 	if args.Term < rf.term {
 		reply.Success = false
 		return
-	} else if args.Term >= rf.term {
+	} 
+
+	if args.Term >= rf.term {
 		rf.turnToFollow()
 		rf.term = args.Term
 		rf.leaderID = args.LeaderId
+		// IMPORTANT!!!
+		// After turn myself to follower, I also reset voteFor to NULL, this caused
+		// I may revote to someone else in the same term! (TOOK ME 3 DAYS DEBUGGING)
+		// The fix is below, set votedFor to leader in each AppendEntries handler.
+		rf.votedFor = args.LeaderId
 	}
 
 	if rf.leaderID == args.LeaderId {
@@ -677,7 +685,7 @@ func (rf *Raft) beginElection() {
 		
 		go func(serverIndex int) {			
 			reply := &RequestVoteReply{}
-			log.Println(rf.me, "hi vote for me", req)
+			//log.Println(rf.me, "hi vote for me", req)
 			ok := rf.sendRequestVote(serverIndex, req, reply)
 			if ok {
 				rf.debug("receive from server %d term %d vote %t", serverIndex, reply.Term, reply.VoteGranted)
@@ -705,7 +713,7 @@ func (rf *Raft) beginElection() {
 
 func (rf *Raft) startElectionProcess() {
 	electionTimeout := func() time.Duration { // Randomized timeouts between [500, 600)-ms
-		return (300 + time.Duration(rand.Intn(100))) * time.Millisecond
+		return (500 + time.Duration(rand.Intn(100))) * time.Millisecond
 	}
 
 	rf.timeout = electionTimeout()
