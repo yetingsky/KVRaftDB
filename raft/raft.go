@@ -28,7 +28,7 @@ import (
 )
 
 
-const HeartBeatInterval = 95 * time.Millisecond
+const HeartBeatInterval = 60 * time.Millisecond
 const CommitApplyIdleCheckInterval = 15 * time.Millisecond
 const LeaderPeerTickInterval = 10 * time.Millisecond
 
@@ -215,7 +215,7 @@ func (rf *Raft) checkIfLogUpdateToDate(lastLogIndex int, lastLogTerm int) bool {
 	if lastT == lastLogTerm {
 		return lastI <= lastLogIndex
 	} else {
-		return lastT <= lastLogTerm
+		return lastT < lastLogTerm
 	}
 }
 
@@ -237,25 +237,11 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	if args.Term < rf.term {
 		reply.VoteGranted = false		
 	} else if args.Term >= rf.term && updateToDate {
-		if args.Term == rf.term {
-			// if our terms are the same, we need to check if we already voted for someone else or not
-			index, term := rf.getLastLogEntry()
-			if rf.votedFor != -1 && rf.votedFor != args.CandidateId && term == args.LastLogTerm && index == args.LastLogIndex{
-				// we have voted someone else this term, we cannot vote you
-				reply.VoteGranted = false
-			} else {
-				// we are in the same term, but I haven't voted for anyone, so I vote you
-				rf.turnToFollow()
-				reply.VoteGranted = true 
-				rf.votedFor = args.CandidateId
-			}
-		} else {
-			// your term is larger than me, of course I will vote for you no matter what
-			rf.turnToFollow()
-			rf.term = args.Term
-			reply.VoteGranted = true
-			rf.votedFor = args.CandidateId
-		}
+		// of course I will vote for you no matter what
+		rf.turnToFollow()
+		rf.term = args.Term
+		reply.VoteGranted = true
+		rf.votedFor = args.CandidateId
 	} else if (rf.votedFor == -1 || args.CandidateId == rf.votedFor) && updateToDate {
 		rf.votedFor = args.CandidateId
 		reply.VoteGranted = true
