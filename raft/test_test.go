@@ -661,7 +661,7 @@ func TestPersist32C(t *testing.T) {
 // haven't been committed yet.
 //
 func TestFigure82C(t *testing.T) {
-	log.SetOutput(ioutil.Discard)
+	//log.SetOutput(ioutil.Discard)
 	servers := 5
 	cfg := make_config(t, servers, false)
 	defer cfg.cleanup()
