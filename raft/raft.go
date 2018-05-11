@@ -18,7 +18,7 @@ package raft
 //
 
 import (
-	"log"
+	//"log"
 	"kvdb/labgob"
 	"bytes"
 	"time"
@@ -238,12 +238,19 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		reply.VoteGranted = false		
 	} else if args.Term >= rf.term && updateToDate {
 		if args.Term == rf.term {
-			if rf.votedFor != -1 && rf.votedFor != args.CandidateId {
+			// if our terms are the same, we need to check if we already voted for someone else or not
+			index, term := rf.getLastLogEntry()
+			if rf.votedFor != -1 && rf.votedFor != args.CandidateId && term == args.LastLogTerm && index == args.LastLogIndex{
 				// we have voted someone else this term, we cannot vote you
-				log.Println("Sorry, we cannot vote")
 				reply.VoteGranted = false
+			} else {
+				// we are in the same term, but I haven't voted for anyone, so I vote you
+				rf.turnToFollow()
+				reply.VoteGranted = true 
+				rf.votedFor = args.CandidateId
 			}
 		} else {
+			// your term is larger than me, of course I will vote for you no matter what
 			rf.turnToFollow()
 			rf.term = args.Term
 			reply.VoteGranted = true
@@ -642,7 +649,7 @@ func (rf *Raft) appendEntriesLoopForPeer(server int, sendAppendChan chan struct{
 func (rf *Raft) becomeLeader() {
 	rf.state = Leader
 	rf.leaderID = rf.me
-	rf.debug("I am a leader!")
+	//rf.debug("I am a leader!")
 
 	rf.sendAppendChan = make([]chan struct{}, len(rf.peers))
 
