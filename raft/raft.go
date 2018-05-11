@@ -19,6 +19,7 @@ package raft
 
 import (
 	"log"
+	//"log"
 	"kvdb/labgob"
 	"bytes"
 	"time"
@@ -28,7 +29,7 @@ import (
 )
 
 
-const HeartBeatInterval = 90 * time.Millisecond
+const HeartBeatInterval = 40 * time.Millisecond
 const CommitApplyIdleCheckInterval = 15 * time.Millisecond
 const LeaderPeerTickInterval = 10 * time.Millisecond
 
@@ -95,8 +96,8 @@ type Raft struct {
 }
 
 func (rf *Raft) debug(format string, a ...interface{}) {
-	args := append([]interface{}{rf.me, rf.term, rf.state}, a...)
-	log.Printf("[INFO] Raft:[Id:%d|Term:%d|State:%s|] " + format, args...)
+	//args := append([]interface{}{rf.me, rf.term, rf.state}, a...)
+	//log.Printf("[INFO] Raft:[Id:%d|Term:%d|State:%s|] " + format, args...)
 }
 
 func (rf *Raft) Lock() {
@@ -239,7 +240,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		rf.term = args.Term
 	}
 
-	log.Println(rf.me, "before got vote ask", args, "updateTodate?", updateToDate, "my term is", rf.term, "my voted is to", rf.votedFor, "did I vote?", reply.VoteGranted, rf.log)
+	//log.Println(rf.me, "before got vote ask", args, "updateTodate?", updateToDate, "my term is", rf.term, "my voted is to", rf.votedFor, "did I vote?", reply.VoteGranted, rf.log)
 
 
 	if args.Term < rf.term {
@@ -249,7 +250,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		reply.VoteGranted = true
 	} 
 
-	log.Println(rf.me, "after got vote ask", args, "updateTodate?", updateToDate, "my term is", rf.term, "my voted is to", rf.votedFor, "did I vote?", reply.VoteGranted, rf.log)
+	//log.Println(rf.me, "after got vote ask", args, "updateTodate?", updateToDate, "my term is", rf.term, "my voted is to", rf.votedFor, "did I vote?", reply.VoteGranted, rf.log)
 	rf.persist()
 }
 
@@ -306,7 +307,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		rf.lastHeartBeat = time.Now()
 	}
 
-	log.Println(rf.me, "receives", args, "my logs are", rf.log)
+	//log.Println(rf.me, "receives", args, "my logs are", rf.log)
 
 	// find previous index
 	// Note: preIndex is -1 in two cases:
@@ -356,11 +357,11 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 			rf.log = append(rf.log, args.Entries[entryIndex:]...)
 		}
 
-		log.Println(rf.me, "request leader commit index is", args.LeaderCommit, "my commit index", rf.commitIndex, rf.log)
+		//log.Println(rf.me, "request leader commit index is", args.LeaderCommit, "my commit index", rf.commitIndex, rf.log)
 		if args.LeaderCommit > rf.commitIndex {
 			rf.commitIndex = min(args.LeaderCommit, len(rf.log))
 		}
-		log.Println(rf.me, "commit index", rf.commitIndex)
+		//log.Println(rf.me, "commit index", rf.commitIndex)
 		reply.Success = true
 	} else {
 		// When rejecting AppendEntries, followers include the term of the conflicting entry,
@@ -551,7 +552,7 @@ func (rf *Raft) sendAppendEntries(s int, sendAppendChan chan struct{}) {
 		Entries : entries,
 		LeaderCommit : rf.commitIndex,
 	}	
-	log.Println(rf.me, "send append entries args to peer", s, "args are:", args, "my logs", rf.log)
+	//log.Println(rf.me, "send append entries args to peer", s, "args are:", args, "my logs", rf.log)
 
 	rf.UnLock()
 
@@ -735,7 +736,7 @@ func (rf *Raft) startLocalApplyProcess(applyChan chan ApplyMsg) {
 	for {
 		if rf.commitIndex >= 0 && rf.commitIndex > rf.lastApplied && !rf.isDecommissioned {
 			if rf.commitIndex - rf.lastApplied > 1 {
-				//log.Println(rf.me, "we are ready to send commit index", rf.commitIndex, rf.log, "last applied", rf.lastApplied)
+				log.Println(rf.me, "we are ready to send commit index", rf.commitIndex, rf.log, "last applied", rf.lastApplied)
 			}
 
 			// we need to fill the missing commit entries			
@@ -746,12 +747,15 @@ func (rf *Raft) startLocalApplyProcess(applyChan chan ApplyMsg) {
 					//log.Println(rf.me, "send index", nextLogIndex)
 				}
 
+				rf.Lock()
+				rf.lastApplied++
+				rf.UnLock()
+
 				applyChan <- ApplyMsg {
 					CommandIndex:nextLogIndex + 1, // index starts from 1. log index starts from 0
 					Command:rf.log[nextLogIndex].Cmd,
 					CommandValid : true,
-				}				
-				
+				}
 				nextLogIndex++
 			}
 			

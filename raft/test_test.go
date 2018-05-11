@@ -9,6 +9,8 @@ package raft
 //
 
 import (
+	"log"
+	"io/ioutil"
 	//"io/ioutil"
 	//"log"
 	"testing"
@@ -748,7 +750,7 @@ func TestUnreliableAgree2C(t *testing.T) {
 }
 
 func TestFigure8Unreliable2C(t *testing.T) {
-	//log.SetOutput(ioutil.Discard)
+	log.SetOutput(ioutil.Discard)
 	servers := 5
 	cfg := make_config(t, servers, true)
 	defer cfg.cleanup()
