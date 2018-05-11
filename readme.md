@@ -9,6 +9,6 @@ Raft manages a service's state replicas, and in particular it helps the service 
 
 - [x] Lab 2: Raft
 
-- [] Lab 3: Fault-tolerant Key/Value Service
+- [ ] Lab 3: Fault-tolerant Key/Value Service
 
-- [] Lab 4: Sharded Key/Value Service
+- [ ] Lab 4: Sharded Key/Value Service
