@@ -18,7 +18,6 @@ package raft
 //
 
 import (
-	"log"
 	//"log"
 	"kvdb/labgob"
 	"bytes"
@@ -29,7 +28,7 @@ import (
 )
 
 
-const HeartBeatInterval = 40 * time.Millisecond
+const HeartBeatInterval = 90 * time.Millisecond
 const CommitApplyIdleCheckInterval = 15 * time.Millisecond
 const LeaderPeerTickInterval = 5 * time.Millisecond
 
@@ -240,7 +239,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		rf.term = args.Term
 	}
 
-	//log.Println(rf.me, "before got vote ask", args, "updateTodate?", updateToDate, "my term is", rf.term, "my voted is to", rf.votedFor, "did I vote?", reply.VoteGranted, rf.log)
+	//log.Println(rf.me, "before got vote ask", args, "updateTodate?", updateToDate, "my term is", rf.term, "my voted is to", rf.votedFor, "did I vote?", reply.VoteGranted/*, rf.log*/)
 
 
 	if args.Term < rf.term {
@@ -250,7 +249,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		reply.VoteGranted = true
 	} 
 
-	//log.Println(rf.me, "after got vote ask", args, "updateTodate?", updateToDate, "my term is", rf.term, "my voted is to", rf.votedFor, "did I vote?", reply.VoteGranted, rf.log)
+	//log.Println(rf.me, "after got vote ask", args, "updateTodate?", updateToDate, "my term is", rf.term, "my voted is to", rf.votedFor, "did I vote?", reply.VoteGranted/*, rf.log*/)
 	rf.persist()
 }
 
@@ -307,7 +306,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		rf.lastHeartBeat = time.Now()
 	}
 
-	//log.Println(rf.me, "receives", args, "my logs are", rf.log)
+	//log.Println(rf.me, "receives", args/*, "my logs are", rf.log*/)
 
 	// find previous index
 	// Note: preIndex is -1 in two cases:
@@ -357,7 +356,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 			rf.log = append(rf.log, args.Entries[entryIndex:]...)
 		}
 
-		//log.Println(rf.me, "request leader commit index is", args.LeaderCommit, "my commit index", rf.commitIndex, rf.log)
+		//log.Println(rf.me, "request leader commit index is", args.LeaderCommit, "my commit index", rf.commitIndex/*, rf.log*/)
 		if args.LeaderCommit > rf.commitIndex {
 			rf.commitIndex = min(args.LeaderCommit, len(rf.log))
 		}
@@ -453,7 +452,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	
 	rf.persist()
 
-	rf.debug("add command %v", command)
+	//rf.debug("add command %v", command)
 	return len(rf.log), rf.term, true
 }
 
@@ -497,7 +496,7 @@ func (rf *Raft) updateCommitIndex() {
 		}
 		if count > len(rf.peers)/2 {
 			rf.commitIndex = i
-			log.Println(rf.me, "peer got commit index", rf.commitIndex, "count is", count, "peer num is", len(rf.peers)/2)
+			//log.Println(rf.me, "peer got commit index", rf.commitIndex, "count is", count, "peer num is", len(rf.peers)/2)
 			break
 		}
 		i--
@@ -631,7 +630,7 @@ func (rf *Raft) appendEntriesLoopForPeer(server int, sendAppendChan chan struct{
 func (rf *Raft) becomeLeader() {
 	rf.state = Leader
 	rf.leaderID = rf.me
-	rf.debug("I am a leader!")
+	//rf.debug("I am a leader!")
 
 	rf.nextIndex = make([]int, len(rf.peers))
 	rf.matchIndex = make([]int, len(rf.peers))
@@ -689,7 +688,7 @@ func (rf *Raft) beginElection() {
 			//log.Println(rf.me, "hi vote for me", req)
 			ok := rf.sendRequestVote(serverIndex, req, reply)
 			if ok {
-				rf.debug("receive from server %d term %d vote %t", serverIndex, reply.Term, reply.VoteGranted)
+				//rf.debug("receive from server %d term %d vote %t", serverIndex, reply.Term, reply.VoteGranted)
 
 				if reply.Term > rf.term {
 					rf.Lock()
@@ -714,7 +713,6 @@ func (rf *Raft) beginElection() {
 
 func (rf *Raft) startElectionProcess() {
 	electionTimeout := func() time.Duration { // Randomized timeouts between [500, 600)-ms
-		return (500 + time.Duration(rand.Intn(100))) * time.Millisecond
 	}
 
 	rf.timeout = electionTimeout()
@@ -736,7 +734,7 @@ func (rf *Raft) startLocalApplyProcess(applyChan chan ApplyMsg) {
 	for {
 		if rf.commitIndex >= 0 && rf.commitIndex > rf.lastApplied && !rf.isDecommissioned {
 			if rf.commitIndex - rf.lastApplied > 1 {
-				log.Println(rf.me, "we are ready to send commit index", rf.commitIndex, rf.log, "last applied", rf.lastApplied)
+				//log.Println(rf.me, "we are ready to send commit index", rf.commitIndex, rf.log, "last applied", rf.lastApplied)
 			}
 
 			// we need to fill the missing commit entries			
@@ -750,7 +748,7 @@ func (rf *Raft) startLocalApplyProcess(applyChan chan ApplyMsg) {
 				rf.Lock()
 				rf.lastApplied++
 				rf.UnLock()
-
+				//rf.debug("apply index %d to service", rf.lastApplied)
 				applyChan <- ApplyMsg {
 					CommandIndex:nextLogIndex + 1, // index starts from 1. log index starts from 0
 					Command:rf.log[nextLogIndex].Cmd,
