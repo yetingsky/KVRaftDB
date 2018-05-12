@@ -31,7 +31,7 @@ import (
 
 const HeartBeatInterval = 40 * time.Millisecond
 const CommitApplyIdleCheckInterval = 15 * time.Millisecond
-const LeaderPeerTickInterval = 10 * time.Millisecond
+const LeaderPeerTickInterval = 5 * time.Millisecond
 
 //
 // as each Raft peer becomes aware that successive log entries are
