@@ -247,6 +247,8 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	} else if (rf.votedFor == -1 || args.CandidateId == rf.votedFor) && updateToDate {
 		rf.votedFor = args.CandidateId
 		reply.VoteGranted = true
+		// restart election timer if we voted someone. This caused unreliable test random fail
+		rf.lastHeartBeat = time.Now()
 	} 
 
 	//log.Println(rf.me, "after got vote ask", args, "updateTodate?", updateToDate, "my term is", rf.term, "my voted is to", rf.votedFor, "did I vote?", reply.VoteGranted/*, rf.log*/)
@@ -556,6 +558,12 @@ func (rf *Raft) sendAppendEntries(s int, sendAppendChan chan struct{}) {
 	rf.UnLock()
 
 	reply := &AppendEntriesReply {}
+
+	/*request := func() bool {
+		return rf.appendEntries(s, args, reply)
+	}
+
+	ok := SendRPCRequest(request)*/
 	ok := rf.appendEntries(s, args, reply)
 	if ok {
 		if rf.state != Leader || rf.isDecommissioned || args.Term != rf.term {
@@ -577,6 +585,7 @@ func (rf *Raft) sendAppendEntries(s int, sendAppendChan chan struct{}) {
 			if len(entries) > 0 {
 				rf.matchIndex[s] = preLogIndex + len(entries)
 				rf.nextIndex[s] = rf.matchIndex[s] + 1
+				rf.updateCommitIndex()
 			}	
 		} else {
 			//rf.debug("reduce next index for server %d", s)
@@ -589,8 +598,6 @@ func (rf *Raft) sendAppendEntries(s int, sendAppendChan chan struct{}) {
 			//log.Println(rf.me, "all next indexes are", rf.nextIndex, "my logs", rf.log)
 			sendAppendChan <- struct{}{}
 		}
-
-		rf.updateCommitIndex()
 	}	
 	rf.persist()
 }
@@ -663,7 +670,7 @@ func (rf *Raft) beginElection() {
 	rf.state = Candidate
 	rf.term++
 	rf.votedFor = rf.me	
-
+	
 	voteCount := 1
 	cachedTerm := rf.term
 
@@ -686,6 +693,7 @@ func (rf *Raft) beginElection() {
 		go func(serverIndex int) {			
 			reply := &RequestVoteReply{}
 			//log.Println(rf.me, "hi vote for me", req)
+
 			ok := rf.sendRequestVote(serverIndex, req, reply)
 			if ok {
 				//rf.debug("receive from server %d term %d vote %t", serverIndex, reply.Term, reply.VoteGranted)
@@ -713,6 +721,7 @@ func (rf *Raft) beginElection() {
 
 func (rf *Raft) startElectionProcess() {
 	electionTimeout := func() time.Duration { // Randomized timeouts between [500, 600)-ms
+		return (500 + time.Duration(rand.Intn(300))) * time.Millisecond
 	}
 
 	rf.timeout = electionTimeout()
@@ -730,6 +739,13 @@ func (rf *Raft) startElectionProcess() {
 	}	
 }
 
+func Max(x, y int) int {
+	if x > y {
+		return x
+	}
+	return y
+}
+
 func (rf *Raft) startLocalApplyProcess(applyChan chan ApplyMsg) {
 	for {
 		if rf.commitIndex >= 0 && rf.commitIndex > rf.lastApplied && !rf.isDecommissioned {
@@ -741,10 +757,6 @@ func (rf *Raft) startLocalApplyProcess(applyChan chan ApplyMsg) {
 			nextLogIndex := rf.lastApplied // next log index we want to apply
 			cachedCommitIndex := rf.commitIndex
 			for nextLogIndex < cachedCommitIndex {
-				if cachedCommitIndex - rf.lastApplied > 1 {
-					//log.Println(rf.me, "send index", nextLogIndex)
-				}
-
 				rf.Lock()
 				rf.lastApplied++
 				rf.UnLock()
