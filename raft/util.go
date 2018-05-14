@@ -1,6 +1,7 @@
 package raft
 
 import (
+	"time"
 	"log"
 )
 
@@ -14,25 +15,24 @@ func DPrintf(format string, a ...interface{}) (n int, err error) {
 	return
 }
 
-const RPCMaxTries = 2
+const RPCMaxTries = 5
+const RPCTimeout = 50 * time.Millisecond
 
 // SendRPCRequest will attempt a request `RPCMaxTries` tries
 func SendRPCRequest(request func() bool) bool {
-	makeRequest := func(successChan chan int) {
+	makeRequest := func(successChan chan struct{}) {
 		if ok := request(); ok {
-			successChan <- 1
-		} else {
-			successChan <- 0
+			successChan <- struct{}{}
 		}
 	}
 
 	for attempts := 0; attempts < RPCMaxTries; attempts++ {
-		rpcChan := make(chan int, 1)
+		rpcChan := make(chan struct{}, 1)
 		go makeRequest(rpcChan)
-		
-		result := <-rpcChan
-		if result == 1 {
+		select {
+		case <-rpcChan:
 			return true
+		case <-time.After(RPCTimeout):
 		}
 	}
 	return false
