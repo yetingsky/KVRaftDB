@@ -224,13 +224,11 @@ func (rf *Raft) checkIfLogUpdateToDate(lastLogIndex int, lastLogTerm int) bool {
 //
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// Your code here (2A, 2B).
-	//rf.debug("server %d requires me to vote, your term is %d", args.CandidateId, args.Term)
 
 	rf.Lock()
 	defer rf.UnLock()
 
 	reply.Term = rf.term
-
 	// check if log is up-to-date
 	updateToDate := rf.checkIfLogUpdateToDate(args.LastLogIndex, args.LastLogTerm)
 
@@ -240,8 +238,6 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	}
 
 	//log.Println(rf.me, "before got vote ask", args, "updateTodate?", updateToDate, "my term is", rf.term, "my voted is to", rf.votedFor, "did I vote?", reply.VoteGranted/*, rf.log*/)
-
-
 	if args.Term < rf.term {
 		reply.VoteGranted = false		
 	} else if (rf.votedFor == -1 || args.CandidateId == rf.votedFor) && updateToDate {
@@ -250,7 +246,6 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		// restart election timer if we voted someone. This caused unreliable test random fail
 		rf.lastHeartBeat = time.Now()
 	} 
-
 	//log.Println(rf.me, "after got vote ask", args, "updateTodate?", updateToDate, "my term is", rf.term, "my voted is to", rf.votedFor, "did I vote?", reply.VoteGranted/*, rf.log*/)
 	rf.persist()
 }
@@ -282,7 +277,6 @@ func min(a, b int) int {
 
 func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
 	// Your code here (2A, 2B).
-	//rf.debug("receive append entry from leader %d", args.LeaderId)
 	rf.Lock()
 	defer rf.UnLock()
 
@@ -348,7 +342,6 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 					//log.Println("what what?")
 					rf.log[i].Cmd = args.Entries[entryIndex].Cmd
 				}				
-				
 				entryIndex++
 			}
 		}
@@ -468,7 +461,6 @@ func (rf *Raft) Kill() {
 	// Your code here, if desired.
 	rf.Lock()
 	defer rf.UnLock()
-
 	rf.isDecommissioned = true
 }
 
@@ -564,7 +556,6 @@ func (rf *Raft) sendAppendEntries(s int, sendAppendChan chan struct{}) {
 	}
 
 	ok := SendRPCRequest(request)
-	//ok := rf.appendEntries(s, args, reply)
 	if ok {
 		if rf.state != Leader || rf.isDecommissioned || args.Term != rf.term {
 			return
@@ -719,7 +710,7 @@ func (rf *Raft) beginElection() {
 }
 
 func (rf *Raft) startElectionProcess() {
-	electionTimeout := func() time.Duration { // Randomized timeouts between [500, 600)-ms
+	electionTimeout := func() time.Duration { // Randomized timeouts between [500, 800)-ms
 		return (500 + time.Duration(rand.Intn(300))) * time.Millisecond
 	}
 
@@ -751,21 +742,22 @@ func (rf *Raft) startLocalApplyProcess(applyChan chan ApplyMsg) {
 			rf.Lock()
 			var logs []Log
 			last, cur := rf.lastApplied, rf.commitIndex
-			//log.Println(rf.me, "last applied is", last, "commit index is", cur, "log length is", len(rf.log))
 			if last < cur {
 				rf.lastApplied = rf.commitIndex
 				logs = make([]Log, cur -last)
 				if cur == len(rf.log) {
-					copy(logs, rf.log[last:]) // from element after last applied, to commitIndex(included)
-					//log.Println("copy:", logs, rf.log[last:len(rf.log)])
+					// from element after last applied, to end of logs
+					copy(logs, rf.log[last:]) 
 				} else {
-					copy(logs, rf.log[last: cur]) // from element after last applied, to commitIndex(included)
+					// 'last' index is the log index for element after lastApplied one
+					// 'cur' index is the log index of element after commit one. Exclude it.
+					// Thus, we copy from element after last applied, to commitIndex(included)
+					copy(logs, rf.log[last: cur])
 				}				
 			}
 			rf.UnLock()
 			
 			for i := 0; i < cur - last; i++ {
-				//log.Println(rf.log, logs, "current index", i)
 				applyChan <- ApplyMsg {
 					CommandIndex:last + i + 1,
 					Command:logs[i].Cmd,
@@ -775,8 +767,7 @@ func (rf *Raft) startLocalApplyProcess(applyChan chan ApplyMsg) {
 		} else {
 			<-time.After(CommitApplyIdleCheckInterval)
 		}
-	}	
-	
+	}		
 }
 
 //

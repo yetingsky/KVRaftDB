@@ -18,23 +18,26 @@ func DPrintf(format string, a ...interface{}) (n int, err error) {
 const RPCMaxTries = 5
 const RPCTimeout = 50 * time.Millisecond
 
-// SendRPCRequest will attempt a request `RPCMaxTries` tries
-func SendRPCRequest(request func() bool) bool {
-	/*makeRequest := func(successChan chan struct{}) {
-		if ok := request(); ok {
-			successChan <- struct{}{}
-		}
-	}
 
-	for attempts := 0; attempts < RPCMaxTries; attempts++ {
-		rpcChan := make(chan struct{}, 1)
-		go makeRequest(rpcChan)
-		select {
-		case <-rpcChan:
-			return true
-		case <-time.After(RPCTimeout):
-		}
-	}
-	return false*/
+func SendRPCRequest(request func() bool) bool {
 	return request()
 }
+
+// SendRPCRequest will attempt a request `RPCMaxTries` tries
+// During testing, it is buggy, and not correct according to Raft Paper
+/*makeRequest := func(successChan chan struct{}) {
+	if ok := request(); ok {
+		successChan <- struct{}{}
+	}
+}
+
+for attempts := 0; attempts < RPCMaxTries; attempts++ {
+	rpcChan := make(chan struct{}, 1)
+	go makeRequest(rpcChan)
+	select {
+	case <-rpcChan:
+		return true
+	case <-time.After(RPCTimeout):
+	}
+}
+return false*/
