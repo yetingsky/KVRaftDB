@@ -20,7 +20,7 @@ const RPCTimeout = 50 * time.Millisecond
 
 // SendRPCRequest will attempt a request `RPCMaxTries` tries
 func SendRPCRequest(request func() bool) bool {
-	makeRequest := func(successChan chan struct{}) {
+	/*makeRequest := func(successChan chan struct{}) {
 		if ok := request(); ok {
 			successChan <- struct{}{}
 		}
@@ -35,5 +35,6 @@ func SendRPCRequest(request func() bool) bool {
 		case <-time.After(RPCTimeout):
 		}
 	}
-	return false
+	return false*/
+	return request()
 }

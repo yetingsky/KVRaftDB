@@ -759,7 +759,7 @@ func (rf *Raft) startLocalApplyProcess(applyChan chan ApplyMsg) {
 					copy(logs, rf.log[last:]) // from element after last applied, to commitIndex(included)
 					//log.Println("copy:", logs, rf.log[last:len(rf.log)])
 				} else {
-					copy(logs, rf.log[last: cur+1]) // from element after last applied, to commitIndex(included)
+					copy(logs, rf.log[last: cur]) // from element after last applied, to commitIndex(included)
 				}				
 			}
 			rf.UnLock()
