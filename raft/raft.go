@@ -559,15 +559,14 @@ func (rf *Raft) sendAppendEntries(s int, sendAppendChan chan struct{}) {
 
 	reply := &AppendEntriesReply {}
 
-	/*request := func() bool {
+	request := func() bool {
 		return rf.appendEntries(s, args, reply)
 	}
 
-	ok := SendRPCRequest(request)*/
-	ok := rf.appendEntries(s, args, reply)
+	ok := SendRPCRequest(request)
+	//ok := rf.appendEntries(s, args, reply)
 	if ok {
 		if rf.state != Leader || rf.isDecommissioned || args.Term != rf.term {
-			//rf.debug("I am not leader anymore, discard response!")
 			return
 		}
 
@@ -588,14 +587,12 @@ func (rf *Raft) sendAppendEntries(s int, sendAppendChan chan struct{}) {
 				rf.updateCommitIndex()
 			}	
 		} else {
-			//rf.debug("reduce next index for server %d", s)
 			// go back to conflict log index minus one, so we are safe. but the lowest index is 1.
 			max := reply.ConflictingLogIndex-1
 			if max < 1 {
 				max = 1
 			}
 			rf.nextIndex[s] = max
-			//log.Println(rf.me, "all next indexes are", rf.nextIndex, "my logs", rf.log)
 			sendAppendChan <- struct{}{}
 		}
 	}	
@@ -608,7 +605,7 @@ func (rf *Raft) appendEntriesLoopForPeer(server int, sendAppendChan chan struct{
 	}
 	ticker := time.NewTicker(LeaderPeerTickInterval)
 
-	rf.sendAppendEntries(server, sendAppendChan)
+	go rf.sendAppendEntries(server, sendAppendChan)
 	lastEntrySent := time.Now()
 
 	for {
@@ -694,10 +691,12 @@ func (rf *Raft) beginElection() {
 			reply := &RequestVoteReply{}
 			//log.Println(rf.me, "hi vote for me", req)
 
-			ok := rf.sendRequestVote(serverIndex, req, reply)
-			if ok {
-				//rf.debug("receive from server %d term %d vote %t", serverIndex, reply.Term, reply.VoteGranted)
+			request := func() bool {
+				return rf.sendRequestVote(serverIndex, req, reply)
+			}
 
+			ok := SendRPCRequest(request)
+			if ok {
 				if reply.Term > rf.term {
 					rf.Lock()
 					rf.term = reply.Term
@@ -748,30 +747,31 @@ func Max(x, y int) int {
 
 func (rf *Raft) startLocalApplyProcess(applyChan chan ApplyMsg) {
 	for {
-		if rf.commitIndex >= 0 && rf.commitIndex > rf.lastApplied && !rf.isDecommissioned {
-			if rf.commitIndex - rf.lastApplied > 1 {
-				//log.Println(rf.me, "we are ready to send commit index", rf.commitIndex, rf.log, "last applied", rf.lastApplied)
+		if rf.commitIndex >= 0 && rf.commitIndex > rf.lastApplied {
+			rf.Lock()
+			var logs []Log
+			last, cur := rf.lastApplied, rf.commitIndex
+			//log.Println(rf.me, "last applied is", last, "commit index is", cur, "log length is", len(rf.log))
+			if last < cur {
+				rf.lastApplied = rf.commitIndex
+				logs = make([]Log, cur -last)
+				if cur == len(rf.log) {
+					copy(logs, rf.log[last:]) // from element after last applied, to commitIndex(included)
+					//log.Println("copy:", logs, rf.log[last:len(rf.log)])
+				} else {
+					copy(logs, rf.log[last: cur+1]) // from element after last applied, to commitIndex(included)
+				}				
 			}
-
-			// we need to fill the missing commit entries			
-			nextLogIndex := rf.lastApplied // next log index we want to apply
-			cachedCommitIndex := rf.commitIndex
-			for nextLogIndex < cachedCommitIndex {
-				rf.Lock()
-				rf.lastApplied++
-				rf.UnLock()
-				//rf.debug("apply index %d to service", rf.lastApplied)
+			rf.UnLock()
+			
+			for i := 0; i < cur - last; i++ {
+				//log.Println(rf.log, logs, "current index", i)
 				applyChan <- ApplyMsg {
-					CommandIndex:nextLogIndex + 1, // index starts from 1. log index starts from 0
-					Command:rf.log[nextLogIndex].Cmd,
+					CommandIndex:last + i + 1,
+					Command:logs[i].Cmd,
 					CommandValid : true,
 				}
-				nextLogIndex++
 			}
-			
-			rf.Lock()
-			rf.lastApplied = cachedCommitIndex
-			rf.UnLock()
 		} else {
 			<-time.After(CommitApplyIdleCheckInterval)
 		}
