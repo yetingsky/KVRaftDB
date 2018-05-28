@@ -18,7 +18,7 @@ package raft
 //
 
 import (
-	//"log"
+	"log"
 	"kvdb/labgob"
 	"bytes"
 	"time"
@@ -95,8 +95,8 @@ type Raft struct {
 }
 
 func (rf *Raft) debug(format string, a ...interface{}) {
-	//args := append([]interface{}{rf.me, rf.term, rf.state}, a...)
-	//log.Printf("[INFO] Raft:[Id:%d|Term:%d|State:%s|] " + format, args...)
+	args := append([]interface{}{rf.me, rf.term, rf.state}, a...)
+	log.Printf("[INFO] Raft:[Id:%d|Term:%d|State:%s|] " + format, args...)
 }
 
 func (rf *Raft) Lock() {
@@ -120,7 +120,12 @@ func (rf *Raft) turnToFollow() {
 // return currentTerm and whether this server
 // believes it is the leader.
 func (rf *Raft) GetState() (int, bool) {
-	return rf.term, rf.isLeader()
+	rf.Lock()
+	t := rf.term
+	isLeader := rf.isLeader()
+	rf.UnLock()
+
+	return t, isLeader
 }
 
 
@@ -141,9 +146,11 @@ func (rf *Raft) persist() {
 
 	w := new(bytes.Buffer)
 	e := labgob.NewEncoder(w)
+	//rf.Lock()
 	e.Encode(rf.term)
 	e.Encode(rf.votedFor)
 	e.Encode(rf.log)
+	//rf.UnLock()
 	data := w.Bytes()
 	rf.persister.SaveRaftState(data)
 }
@@ -180,9 +187,11 @@ func (rf *Raft) readPersist(data []byte) {
 	   d.Decode(&logs) != nil {
 	   //log.Println("Something bad is happening in decoder!")
 	} else {
+	  //rf.Lock()
 	  rf.term = currentTerm
 	  rf.votedFor = votedFor
 	  rf.log = logs
+	  //rf.UnLock()
 	}
 	rf.persist()
 }
@@ -432,12 +441,13 @@ func (rf *Raft) appendEntries(server int, args AppendEntriesArgs, reply *AppendE
 //
 func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	// Your code here (2B).
+	rf.Lock()
+	defer rf.UnLock()
+
 	if rf.isLeader() == false {
 		return -1, -1, false
 	}
-
-	rf.Lock()
-	defer rf.UnLock()
+	
 	entry := Log{
 		Cmd : command,
 		Term : rf.term,

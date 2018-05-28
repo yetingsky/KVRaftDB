@@ -1,13 +1,20 @@
 package raftkv
 
-import "labrpc"
-import "crypto/rand"
-import "math/big"
+import (
+	//"time"
+	//"log"
+	"kvdb/labrpc"
+	"crypto/rand"
+	"math/big"
+)
 
 
 type Clerk struct {
 	servers []*labrpc.ClientEnd
 	// You will have to modify this struct.
+	lastLeader int64
+	clientId int64
+	serialNum int64
 }
 
 func nrand() int64 {
@@ -21,6 +28,10 @@ func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 	ck := new(Clerk)
 	ck.servers = servers
 	// You'll have to add code here.
+	ck.lastLeader = 0
+
+	ck.clientId = nrand()
+	ck.serialNum = 0
 	return ck
 }
 
@@ -36,10 +47,31 @@ func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 // must match the declared types of the RPC handler function's
 // arguments. and reply must be passed as a pointer.
 //
-func (ck *Clerk) Get(key string) string {
 
+func (ck *Clerk) Get(key string) string {
 	// You will have to modify this function.
-	return ""
+	args := GetArgs {
+		Key : key,
+		ClientId : ck.clientId,
+		SerialNum : ck.serialNum,
+	}
+
+	numOfInstances := int64(len(ck.servers))
+	index := ck.lastLeader
+	reply := GetReply{}
+
+	for reply.Err != OK {		
+		ok := ck.servers[index % numOfInstances].Call("RaftKV.Get", &args, &reply)
+		if !ok || reply.WrongLeader {
+			index++
+		} else if reply.Err == ErrNoKey {
+			return ""
+		}
+	}
+
+	ck.serialNum++
+	ck.lastLeader = index % numOfInstances
+	return reply.Value
 }
 
 //
@@ -54,6 +86,27 @@ func (ck *Clerk) Get(key string) string {
 //
 func (ck *Clerk) PutAppend(key string, value string, op string) {
 	// You will have to modify this function.
+	args := PutAppendArgs {
+		Key : key,
+		Value : value,
+		Op : op,
+		ClientId : ck.clientId,
+		SerialNum : ck.serialNum,
+	}
+	//log.Println("args:", "key", args.Key, "value", args.Value, args.Op)
+	numOfInstances := int64(len(ck.servers))
+	index := ck.lastLeader
+	reply := GetReply{}
+
+	for reply.Err != OK {		
+		ok := ck.servers[index % numOfInstances].Call("RaftKV.PutAppend", &args, &reply)
+		if !ok || reply.WrongLeader {
+			index++
+		}
+	}
+
+	ck.serialNum++
+	ck.lastLeader = index % numOfInstances
 }
 
 func (ck *Clerk) Put(key string, value string) {

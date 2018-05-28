@@ -1,6 +1,6 @@
 package raftkv
 
-import "labrpc"
+import "kvdb/labrpc"
 import "testing"
 import "os"
 
@@ -10,7 +10,7 @@ import "math/rand"
 import "encoding/base64"
 import "sync"
 import "runtime"
-import "raft"
+import "kvdb/raft"
 import "fmt"
 
 func randstring(n int) string {
