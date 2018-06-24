@@ -261,3 +261,8 @@ Test (2C): Figure 8 (unreliable) ...
   ... Passed --  32.6  5 1844  385
 Test (2C): Figure 8 (unreliable) ...
   ... Passed --  38.6  5 2989  381
+
+
+ when size reach threshold, save snapshot
+ tell raft to slice its log
+ kv server read from snapshot when restart 

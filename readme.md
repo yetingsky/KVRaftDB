@@ -9,6 +9,22 @@ Raft manages a service's state replicas, and in particular it helps the service 
 
 - [x] Lab 2: Raft
 
-- [ ] Lab 3: Fault-tolerant Key/Value Service
+- [x] Lab 3: Fault-tolerant Key/Value Service
+- [x] Part A Key/value service without log compaction
+- [x] Part B Key/value service with log compaction
 
 - [ ] Lab 4: Sharded Key/Value Service
+
+pprof can check goroutine stacks at runtime
+https://golang.org/pkg/net/http/pprof/
+
+
+Lab3 B modify Raft and kvserver to cooperate to save space: from time to time kvserver will persistently store a "snapshot" of its current state, and Raft will discard log entries that precede the snapshot. When a server restarts (or falls far behind the leader and must catch up), the server first installs a snapshot and then replays log entries from after the point at which the snapshot was created. Section 7 of the extended Raft paper outlines the scheme.
+
+The snapshot flow:
+when kvraft reaches 95% threhold, save snapshot for keyValue Map, client request by uuid map
+When raft leaders found the next index to send for follower X is less than his snapshot index, it knows the next log entry to send is in snapshot, so leader sends an entire snapshot to that follower
+When follower gets the snapshot, save it(replace with current one)
+In each raft server local apply logic, if last applied index is less than snapshot, it needs to apply the snapshot it has, include the saved data to applyMsg, so the kvRaft app can get it
+when kvraft app gets it, load the data, save as keyValue Map, client request by uuid map
+One iteration completed.

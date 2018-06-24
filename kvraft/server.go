@@ -4,6 +4,8 @@ import (
 	"time"
 	"encoding/gob"
 	"kvdb/labrpc"
+	"kvdb/labgob"
+	"bytes"
 	"log"
 	"kvdb/raft"
 	"sync"
@@ -39,13 +41,14 @@ type RaftKV struct {
 	applyCh chan raft.ApplyMsg
 
 	maxraftstate int // snapshot if log grows this big
+	snapshotsEnabled bool
 
 	// Your definitions here.
 	isLeader bool
 
-	kvmap map[string]string
+	Kvmap map[string]string
 
-	clientIdBySerialNum map[int64]int64
+	ClientIdBySerialNum map[int64]int64
 
 	requestHandlers map[int]chan raft.ApplyMsg
 }
@@ -58,9 +61,34 @@ func (rf *RaftKV) UnLock() {
 	rf.mu.Unlock()
 }
 
+func (kv *RaftKV) createSnapshot(logIndex int) {
+	w := new(bytes.Buffer)
+	e := labgob.NewEncoder(w)
+	e.Encode(kv.Kvmap)
+	e.Encode(kv.ClientIdBySerialNum)
+	data := w.Bytes()
+	kv.rf.SaveSnapShot(data)
+
+	// Compact raft log til index.
+	kv.rf.CompactLog(logIndex)
+}
+
+func (kv *RaftKV) loadSnapshot(data []byte) {
+	r := bytes.NewBuffer(data)
+	d := labgob.NewDecoder(r)
+	kvmap := make(map[string]string)
+	clientIdBySerialNum := make(map[int64]int64)
+	d.Decode(&kvmap)
+	d.Decode(&clientIdBySerialNum)
+
+	kv.Kvmap = kvmap
+	kv.ClientIdBySerialNum = clientIdBySerialNum
+}
+
+
 // 我之前的做法是一个for loop 睡interval再继续， 每次loop all cached log看来的Index是否match存在
-// 缺点是如果消息在Interval之内回来 我也继续睡。log会增长过大 没有效率
-// 现在的实现是一个general await api, 每隔Interval检查一下还是不是leader。 以及applied index committed消息抵达
+// 缺点是如果消息在Interval之内回来 我也继续睡。log会增长过大 没有效率.而且忘记测是否是leader！
+// 现在的实现是一个general await api, 每隔Interval检查一下还是不是leader。 或者applied index committed消息抵达
 // 如果是当初pass in的command, 直接trigger RPC handler
 // 最后就是处理好正确或者错误的Case之后删除channel
 func (kv *RaftKV) await(index int, op Op) (success bool) {
@@ -121,7 +149,7 @@ func (kv *RaftKV) Get(args *GetArgs, reply *GetReply) {
 			reply.WrongLeader = false			
 
 			//log.Println(kv.me, "Get I got you", ops)
-			if val, ok := kv.kvmap[args.Key]; ok {
+			if val, ok := kv.Kvmap[args.Key]; ok {
 				reply.Value = val
 				reply.Err = OK
 			} else {
@@ -134,7 +162,6 @@ func (kv *RaftKV) Get(args *GetArgs, reply *GetReply) {
 
 func (kv *RaftKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	// Your code here.
-
 	ops := Op{
 		Method : args.Op,
 		Key : args.Key,
@@ -164,10 +191,27 @@ func (kv *RaftKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	}
 }
 
+func (kv *RaftKV) raftStateSizeHitThreshold() bool {
+	if kv.maxraftstate == -1 {
+		return false
+	}
+	raftSize := kv.rf.GetRaftStateSize()
+	if raftSize >= kv.maxraftstate {//* 100 / 95 {
+		return true
+	}
+	return false
+}
 
 func (kv *RaftKV) periodCheckApplyMsg() {
 	for m := range kv.applyCh {
 		kv.Lock()
+
+		// ApplyMsg might be a request to load snapshot
+		if m.UseSnapshot { 
+			kv.loadSnapshot(m.Snapshot)
+			kv.UnLock()
+			continue
+		}
 		
 		ops := m.Command.(Op)
 
@@ -176,20 +220,31 @@ func (kv *RaftKV) periodCheckApplyMsg() {
 		// Get request we do not care, handler will do the fetch.
 		// For Put or Append, we do it here.
 		// Alternatively, each RPC handler will have the following logic
-		if serialN, ok := kv.clientIdBySerialNum[ops.ClientId]; !ok || serialN != ops.SerialNum {
+		if serialN, ok := kv.ClientIdBySerialNum[ops.ClientId]; !ok || serialN != ops.SerialNum {
 			// save the client id and its serial number
-			kv.clientIdBySerialNum[ops.ClientId] = ops.SerialNum
+			kv.ClientIdBySerialNum[ops.ClientId] = ops.SerialNum
 			if ops.Method == "Put" {
-				kv.kvmap[ops.Key] = ops.Value
+				kv.Kvmap[ops.Key] = ops.Value
 			} else if ops.Method == "Append" {
-				kv.kvmap[ops.Key] += ops.Value
+				kv.Kvmap[ops.Key] += ops.Value
 			}
 		}
 
+		//log.Println(kv.rf.Me(), "got applied message", m)
+		
 		// When we have applied message, we found the waiting channel(issued by RPC handler), forward the Ops
 		if c, ok := kv.requestHandlers[m.CommandIndex]; ok {
 			c <- m
 		}
+
+		// Whenever key/value server detects that the Raft state size is approaching this threshold, 
+		// it should save a snapshot, and tell the Raft library that it has snapshotted, 
+		// so that Raft can discard old log entries. 
+		if kv.snapshotsEnabled && kv.raftStateSizeHitThreshold() {
+			//log.Println("we snapshot!")
+			kv.createSnapshot(m.CommandIndex)
+		}
+
 		kv.UnLock()
 	}
 }
@@ -226,17 +281,21 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	kv := new(RaftKV)
 	kv.me = me
 	kv.maxraftstate = maxraftstate
+	kv.snapshotsEnabled = (maxraftstate != -1)
 
 	// You may need initialization code here.
-
 	kv.applyCh = make(chan raft.ApplyMsg)
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
 
 	// You may need initialization code here.
-	kv.kvmap = make(map[string]string)
-	kv.clientIdBySerialNum = make(map[int64]int64)
+	kv.Kvmap = make(map[string]string)
+	kv.ClientIdBySerialNum = make(map[int64]int64)
 
 	kv.requestHandlers = make(map[int]chan raft.ApplyMsg)
+
+	if data := persister.ReadSnapshot(); kv.snapshotsEnabled && data != nil && len(data) > 0 {
+		kv.loadSnapshot(data)
+	}
 
 	go kv.periodCheckApplyMsg()
 

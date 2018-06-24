@@ -9,6 +9,9 @@ import "log"
 import "strings"
 import "sync/atomic"
 
+import _ "net/http/pprof"
+import "net/http"
+
 // The tester generously allows solutions to complete elections in one second
 // (much more than the paper's range of timeouts).
 const electionTimeout = 1 * time.Second
@@ -235,6 +238,11 @@ func GenericTest(t *testing.T, tag string, nclients int, unreliable bool, crash 
 
 func TestBasic3A(t *testing.T) {
 	fmt.Printf("Test: One client ...\n")
+
+	go func() {
+		log.Println(http.ListenAndServe("localhost:6060", nil))
+	}()
+
 	GenericTest(t, "basic", 1, false, false, false, -1)
 }
 
@@ -399,7 +407,7 @@ func TestPersistPartitionUnreliable3A(t *testing.T) {
 // also checks that majority discards committed log entries
 // even if minority doesn't respond.
 //
-func TestSnapshotRPC(t *testing.T) {
+func TestSnapshotRPC3B(t *testing.T) {
 	const nservers = 3
 	maxraftstate := 1000
 	cfg := make_config(t, "snapshotrpc", nservers, false, maxraftstate)
@@ -455,7 +463,7 @@ func TestSnapshotRPC(t *testing.T) {
 
 // are the snapshots not too huge? 500 bytes is a generous bound for the
 // operations we're doing here.
-func TestSnapshotSize(t *testing.T) {
+func TestSnapshotSize3B(t *testing.T) {
 	const nservers = 3
 	maxraftstate := 1000
 	maxsnapshotstate := 500
@@ -486,27 +494,27 @@ func TestSnapshotSize(t *testing.T) {
 	fmt.Printf("  ... Passed\n")
 }
 
-func TestSnapshotRecover(t *testing.T) {
+func TestSnapshotRecover3B(t *testing.T) {
 	fmt.Printf("Test: persistence with one client and snapshots ...\n")
 	GenericTest(t, "snapshot", 1, false, true, false, 1000)
 }
 
-func TestSnapshotRecoverManyClients(t *testing.T) {
+func TestSnapshotRecoverManyClients3B(t *testing.T) {
 	fmt.Printf("Test: persistence with several clients and snapshots ...\n")
 	GenericTest(t, "snapshotunreliable", 20, false, true, false, 1000)
 }
 
-func TestSnapshotUnreliable(t *testing.T) {
+func TestSnapshotUnreliable3B(t *testing.T) {
 	fmt.Printf("Test: persistence with several clients, snapshots, unreliable ...\n")
 	GenericTest(t, "snapshotunreliable", 5, true, false, false, 1000)
 }
 
-func TestSnapshotUnreliableRecover(t *testing.T) {
+func TestSnapshotUnreliableRecover3B(t *testing.T) {
 	fmt.Printf("Test: persistence with several clients, failures, and snapshots, unreliable ...\n")
 	GenericTest(t, "snapshotunreliablecrash", 5, true, true, false, 1000)
 }
 
-func TestSnapshotUnreliableRecoverConcurrentPartition(t *testing.T) {
+func TestSnapshotUnreliableRecoverConcurrentPartition3B(t *testing.T) {
 	fmt.Printf("Test: persistence with several clients, failures, and snapshots, unreliable and partitions ...\n")
 	GenericTest(t, "snapshotunreliableconcurpartitions", 5, true, true, true, 1000)
 }

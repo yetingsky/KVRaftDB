@@ -58,7 +58,9 @@ func (ck *Clerk) Get(key string) string {
 
 	numOfInstances := int64(len(ck.servers))
 	index := ck.lastLeader
-	reply := GetReply{}
+	reply := GetReply{
+		WrongLeader : false,
+	}
 
 	for reply.Err != OK {		
 		ok := ck.servers[index % numOfInstances].Call("RaftKV.Get", &args, &reply)
@@ -96,7 +98,9 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 	//log.Println("args:", "key", args.Key, "value", args.Value, args.Op)
 	numOfInstances := int64(len(ck.servers))
 	index := ck.lastLeader
-	reply := GetReply{}
+	reply := GetReply{
+		WrongLeader : false,
+	}
 
 	for reply.Err != OK {		
 		ok := ck.servers[index % numOfInstances].Call("RaftKV.PutAppend", &args, &reply)

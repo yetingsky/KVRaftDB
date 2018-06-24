@@ -35,3 +35,5 @@ n 1 sec?
   ... Passed
 PASS
 ok      kvdb/kvraft     226.073s
+
+https://golang.org/pkg/net/http/pprof/
