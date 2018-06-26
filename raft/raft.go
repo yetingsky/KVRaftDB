@@ -662,26 +662,27 @@ func (rf *Raft) sendAppendEntries(s int, sendAppendChan chan struct{}) {
 
 	ok := SendRPCRequest(request)
 
-	rf.Lock()
-	defer rf.UnLock()
-
 	if ok {
 		if rf.state != Leader || rf.isDecommissioned || args.Term != rf.term {
 			return
 		}
 
 		if reply.Term > rf.term {
+			rf.Lock()
 			rf.term = reply.Term
 			rf.turnToFollow()
 			rf.persist()
+			rf.UnLock()
 			return // we are out
 		}
 
 		if reply.Success {
 			// update log
 			if len(entries) > 0 {
+				rf.Lock()
 				rf.matchIndex[s] = preLogIndex + len(entries)
 				rf.nextIndex[s] = rf.matchIndex[s] + 1
+				rf.UnLock()
 				rf.updateCommitIndex()
 			}	
 		} else {
