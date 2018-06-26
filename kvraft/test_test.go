@@ -1,5 +1,6 @@
 package raftkv
 
+import "kvdb/linearizability"
 
 import "testing"
 import "strconv"
