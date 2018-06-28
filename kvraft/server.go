@@ -43,6 +43,8 @@ type RaftKV struct {
 	maxraftstate int // snapshot if log grows this big
 	snapshotsEnabled bool
 
+	isDecommissioned bool
+
 	// Your definitions here.
 	isLeader bool
 
@@ -134,9 +136,9 @@ func (kv *RaftKV) Get(args *GetArgs, reply *GetReply) {
 		SerialNum : args.SerialNum,
 	}
 
-	kv.Lock()
+	//kv.Lock()
 	index, _, isLeader := kv.rf.Start(ops)
-	kv.UnLock()
+	//kv.UnLock()
 
 	if !isLeader {
 		reply.WrongLeader = true
@@ -170,9 +172,9 @@ func (kv *RaftKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 		SerialNum : args.SerialNum,
 	}
 	
-	kv.Lock()
+	//kv.Lock()
 	index, _, isLeader := kv.rf.Start(ops)
-	kv.UnLock()
+	//kv.UnLock()
 
 	if !isLeader {
 		reply.WrongLeader = true
@@ -205,6 +207,11 @@ func (kv *RaftKV) raftStateSizeHitThreshold() bool {
 func (kv *RaftKV) periodCheckApplyMsg() {
 	for m := range kv.applyCh {
 		kv.Lock()
+
+		if kv.isDecommissioned {
+			kv.UnLock()
+			return
+		}
 
 		// ApplyMsg might be a request to load snapshot
 		if m.UseSnapshot { 
@@ -256,8 +263,11 @@ func (kv *RaftKV) periodCheckApplyMsg() {
 // turn off debug output from this instance.
 //
 func (kv *RaftKV) Kill() {
+	//kv.Lock()
+	//defer kv.UnLock()
+
 	kv.rf.Kill()
-	// Your code here, if desired.
+	kv.isDecommissioned = true
 }
 
 //

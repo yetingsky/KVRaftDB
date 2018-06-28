@@ -1,15 +1,20 @@
 package raftkv
 
-import "kvdb/linearizability"
+import (
+	"runtime"
+	"kvdb/linearizability"
 
-import "testing"
-import "strconv"
-import "time"
-import "math/rand"
-import "log"
-import "strings"
-import "sync"
-import "sync/atomic"
+	"testing"
+	"strconv"
+	"time"
+	"math/rand"
+	"log"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"net/http"
+	_ "net/http/pprof"
+)
 
 // The tester generously allows solutions to complete elections in one second
 // (much more than the paper's range of timeouts).
@@ -228,7 +233,7 @@ func GenericTest(t *testing.T, part string, nclients int, unreliable bool, crash
 		atomic.StoreInt32(&done_partitioner, 1) // tell partitioner to quit
 
 		if partitions {
-			// log.Printf("wait for partitioner\n")
+			//log.Printf("wait for partitioner\n")
 			<-ch_partitioner
 			// reconnect network and submit a request. A client may
 			// have submitted a request in a minority.  That request
@@ -240,7 +245,7 @@ func GenericTest(t *testing.T, part string, nclients int, unreliable bool, crash
 		}
 
 		if crash {
-			// log.Printf("shutdown servers\n")
+			//log.Printf("shutdown servers\n")
 			for i := 0; i < nservers; i++ {
 				cfg.ShutdownServer(i)
 			}
@@ -257,13 +262,13 @@ func GenericTest(t *testing.T, part string, nclients int, unreliable bool, crash
 
 		// log.Printf("wait for clients\n")
 		for i := 0; i < nclients; i++ {
-			// log.Printf("read from clients %d\n", i)
+			//log.Printf("read from clients %d\n", i)
 			j := <-clnts[i]
-			// if j < 10 {
-			// 	log.Printf("Warning: client %d managed to perform only %d put operations in 1 sec?\n", i, j)
-			// }
+			//if j < 10 {
+			//	log.Printf("Warning: client %d managed to perform only %d put operations in 1 sec?\n", i, j)
+			//}
 			key := strconv.Itoa(i)
-			// log.Printf("Check %v for client %d\n", j, i)
+			//log.Printf("Check %v for client %d\n", j, i)
 			v := Get(cfg, ck, key)
 			checkClntAppends(t, i, v, j)
 		}
@@ -324,7 +329,7 @@ func GenericTestLinearizability(t *testing.T, part string, nclients int, nserver
 		clnts[i] = make(chan int)
 	}
 	for i := 0; i < 3; i++ {
-		// log.Printf("Iteration %v\n", i)
+		log.Printf("Iteration %v\n", i)
 		atomic.StoreInt32(&done_clients, 0)
 		atomic.StoreInt32(&done_partitioner, 0)
 		go spawn_clients_and_wait(t, cfg, nclients, func(cli int, myck *Clerk, t *testing.T) {
@@ -370,7 +375,7 @@ func GenericTestLinearizability(t *testing.T, part string, nclients int, nserver
 		atomic.StoreInt32(&done_partitioner, 1) // tell partitioner to quit
 
 		if partitions {
-			// log.Printf("wait for partitioner\n")
+			log.Printf("wait for partitioner\n")
 			<-ch_partitioner
 			// reconnect network and submit a request. A client may
 			// have submitted a request in a minority.  That request
@@ -382,14 +387,14 @@ func GenericTestLinearizability(t *testing.T, part string, nclients int, nserver
 		}
 
 		if crash {
-			// log.Printf("shutdown servers\n")
+			log.Printf("shutdown servers\n")
 			for i := 0; i < nservers; i++ {
 				cfg.ShutdownServer(i)
 			}
 			// Wait for a while for servers to shutdown, since
 			// shutdown isn't a real crash and isn't instantaneous
 			time.Sleep(electionTimeout)
-			// log.Printf("restart servers\n")
+			log.Printf("restart servers\n")
 			// crash and re-start all
 			for i := 0; i < nservers; i++ {
 				cfg.StartServer(i)
@@ -413,11 +418,11 @@ func GenericTestLinearizability(t *testing.T, part string, nclients int, nserver
 
 	cfg.end()
 
-	// log.Printf("Checking linearizability of %d operations", len(operations))
-	// start := time.Now()
+	log.Printf("Checking linearizability of %d operations", len(operations))
+	start := time.Now()
 	ok := linearizability.CheckOperationsTimeout(linearizability.KvModel(), operations, linearizabilityCheckTimeout)
-	// dur := time.Since(start)
-	// log.Printf("Linearizability check done in %s; result: %t", time.Since(start).String(), ok)
+	//dur := time.Since(start)
+	log.Printf("Linearizability check done in %s; result: %t", time.Since(start).String(), ok)
 	if !ok {
 		t.Fatal("history is not linearizable")
 	}
@@ -584,6 +589,9 @@ func TestPersistPartitionUnreliable3A(t *testing.T) {
 }
 
 func TestPersistPartitionUnreliableLinearizable3A(t *testing.T) {
+	go func() {
+		log.Println(http.ListenAndServe("localhost:6060", nil))
+	}()
 	// Test: unreliable net, restarts, partitions, linearizability checks (3A) ...
 	GenericTestLinearizability(t, "3A", 15, 7, true, true, true, -1)
 }
@@ -697,16 +705,31 @@ func TestSnapshotUnreliable3B(t *testing.T) {
 }
 
 func TestSnapshotUnreliableRecover3B(t *testing.T) {
+	go func() {
+		log.Println(http.ListenAndServe("localhost:6060", nil))
+	}()
+	
 	// Test: unreliable net, restarts, snapshots, many clients (3B) ...
 	GenericTest(t, "3B", 5, true, true, false, 1000)
 }
 
 func TestSnapshotUnreliableRecoverConcurrentPartition3B(t *testing.T) {
+	go func() {
+		log.Println(http.ListenAndServe("localhost:6060", nil))
+	}()
+
+	//runtime.SetMutexProfileFraction(5)
+	runtime.SetBlockProfileRate(1)
 	// Test: unreliable net, restarts, partitions, snapshots, many clients (3B) ...
 	GenericTest(t, "3B", 5, true, true, true, 1000)
 }
 
 func TestSnapshotUnreliableRecoverConcurrentPartitionLinearizable3B(t *testing.T) {
+
+	go func() {
+		log.Println(http.ListenAndServe("localhost:6060", nil))
+	}()
+
 	// Test: unreliable net, restarts, partitions, snapshots, linearizability checks (3B) ...
 	GenericTestLinearizability(t, "3B", 15, 7, true, true, true, 1000)
 }

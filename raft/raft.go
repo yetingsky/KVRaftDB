@@ -272,8 +272,8 @@ func (rf *Raft) checkIfLogUpdateToDate(lastLogIndex int, lastLogTerm int) bool {
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// Your code here (2A, 2B).
 
-	rf.Lock()
-	defer rf.UnLock()
+	//rf.Lock()
+	//defer rf.UnLock()
 
 	reply.Term = rf.term
 	// check if log is up-to-date
@@ -511,13 +511,14 @@ func (rf *Raft) getLastLogIndex() int {
 //
 func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	// Your code here (2B).
-	rf.Lock()
-	defer rf.UnLock()
-
+	
 	if rf.isLeader() == false {
 		return -1, -1, false
 	}
 	
+	rf.Lock()
+	defer rf.UnLock()
+
 	nextIndex := func() int {
 		if len(rf.log) > 0 {
 			return rf.log[len(rf.log)-1].Index + 1
@@ -534,7 +535,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	
 	rf.persist()
 
-	rf.debug("add command %v", command, entry)
+	//rf.debug("add command %v", command, entry)
 	return entry.Index, rf.term, true
 }
 
@@ -546,15 +547,12 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 //
 func (rf *Raft) Kill() {
 	// Your code here, if desired.
-	rf.Lock()
-	defer rf.UnLock()
+	//rf.Lock()
+	//defer rf.UnLock()
 	rf.isDecommissioned = true
 }
 
 func (rf *Raft) updateCommitIndex() {
-	rf.Lock()
-	defer rf.UnLock()
-
 	i := rf.getLogSize()
 	for i > 0 {
 		v := rf.log[i - 1]
@@ -661,6 +659,9 @@ func (rf *Raft) sendAppendEntries(s int, sendAppendChan chan struct{}) {
 	}
 
 	ok := SendRPCRequest(request)
+
+	//rf.Lock()
+	//defer rf.UnLock()
 
 	if ok {
 		if rf.state != Leader || rf.isDecommissioned || args.Term != rf.term {
@@ -870,15 +871,19 @@ func (rf *Raft) findLogIndex(logIndex int) (int, bool) {
 
 func (rf *Raft) startLocalApplyProcess(applyChan chan ApplyMsg) {
 	for {
+		if rf.isDecommissioned {
+			close(applyChan)
+			return
+		}
+		
 		rf.Lock()
 		cachedCommitIndex := rf.commitIndex
 		cachedLocalApplied := rf.lastApplied
 		rf.UnLock()
 
 		if cachedCommitIndex >= 0 && cachedCommitIndex > cachedLocalApplied {
-			//rf.Lock()
 			if rf.lastApplied < rf.lastSnapshotIndex {
-				//log.Println("we need to install snapshot")
+				//log.Println("we need to install snapshot")				
 
 				applyChan <- ApplyMsg{
 					UseSnapshot: true, 
@@ -890,6 +895,7 @@ func (rf *Raft) startLocalApplyProcess(applyChan chan ApplyMsg) {
 				rf.UnLock()
 
 			} else {
+				rf.Lock()
 				startIndex, _ := rf.findLogIndex(rf.lastApplied + 1)
 				startIndex = Max(startIndex, 0) // If start index wasn't found, it's because it's a part of a snapshot
 
@@ -899,6 +905,7 @@ func (rf *Raft) startLocalApplyProcess(applyChan chan ApplyMsg) {
 						endIndex = i
 					}
 				}
+				rf.UnLock()
 
 				if endIndex >= 0 { // We have some entries to locally commit
 					entries := make([]Log, endIndex-startIndex+1)
@@ -913,14 +920,20 @@ func (rf *Raft) startLocalApplyProcess(applyChan chan ApplyMsg) {
 							CommandValid : true,
 						}
 					}
-					//rf.Lock()
+					rf.Lock()
 					rf.lastApplied += len(entries)
+					rf.UnLock();
 				}
 
 			}
-			//rf.UnLock();			
+						
 		} else {
 			<-time.After(CommitApplyIdleCheckInterval)
+
+			if rf.isDecommissioned {
+				close(applyChan)
+				return
+			}
 		}
 	}		
 }
@@ -1009,7 +1022,9 @@ func (rf *Raft) sendSnapshot(peerIndex int, sendAppendChan chan struct{}) {
 		}
 	}
 
-	sendAppendChan <- struct{}{} // Signal to leader-peer process that there may be appends to send
+	go func() {
+		sendAppendChan <- struct{}{} // Signal to leader-peer process that there may be appends to send
+	}()
 }
 
 // InstallSnapshot - RPC function

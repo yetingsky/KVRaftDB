@@ -1,39 +1,265 @@
-Test: One client ...
-labgob warning: Decoding into a non-default variable/field WrongLeader may not w
-ork
-  ... Passed
-Test: concurrent clients ...
-  ... Passed
-Test: unreliable ...
-  ... Passed
-Test: Concurrent Append to same key, unreliable ...
-  ... Passed
-Test: Progress in majority ...
-  ... Passed
-Test: No progress in minority ...
-  ... Passed
-Test: Completion after heal ...
-  ... Passed
-Test: many partitions ...
-  ... Passed
-Test: many partitions, many clients ...
-  ... Passed
-Test: persistence with one client ...
-  ... Passed
-Test: persistence with concurrent clients ...
-  ... Passed
-Test: persistence with concurrent clients, unreliable ...
-  ... Passed
-Test: persistence with concurrent clients and repartitioning servers...
-  ... Passed
-Test: persistence with concurrent clients and repartitioning servers, unreliable
-...
-2018/05/26 05:48:00 Warning: client 3 managed to perform only 9 put operations i
-n 1 sec?
-2018/05/26 05:48:20 Warning: client 2 managed to perform only 8 put operations i
-n 1 sec?
-  ... Passed
-PASS
-ok      kvdb/kvraft     226.073s
-
 https://golang.org/pkg/net/http/pprof/
+
+D:\Computer Science\6.824\src\kvdb\kvraft>go test
+Test: one client (3A) ...
+labgob warning: Decoding into a non-default variable/field WrongLeader may no
+ork
+  ... Passed --  15.4  5  8613  165
+Test: many clients (3A) ...
+  ... Passed --  15.9  5 24319 1263
+Test: unreliable net, many clients (3A) ...
+  ... Passed --  17.5  5  4093  491
+Test: concurrent append to same key, unreliable (3A) ...
+  ... Passed --   2.1  3   261   52
+Test: progress in majority (3A) ...
+  ... Passed --   0.9  5    96    2
+Test: no progress in minority (3A) ...
+  ... Passed --   1.4  5   151    3
+Test: completion after heal (3A) ...
+  ... Passed --   1.1  5    61    3
+Test: partitions, one client (3A) ...
+  ... Passed --  22.7  5  8259  127
+Test: partitions, many clients (3A) ...
+  ... Passed --  23.7  5 120370  775
+Test: restarts, one client (3A) ...
+  ... Passed --  20.1  5 18294  175
+Test: restarts, many clients (3A) ...
+  ... Passed --  21.2  5 68045  945
+Test: unreliable net, restarts, many clients (3A) ...
+  ... Passed --  22.4  5  4771  474
+Test: restarts, partitions, many clients (3A) ...
+  ... Passed --  28.4  5 91864  686
+Test: unreliable net, restarts, partitions, many clients (3A) ...
+  ... Passed --  29.4  5  5267  383
+Test: unreliable net, restarts, partitions, many clients, linearizability che
+ (3A) ...
+2018/06/27 18:23:12 Iteration 0
+2018/06/27 18:23:18 wait for partitioner
+2018/06/27 18:23:20 shutdown servers
+2018/06/27 18:23:21 restart servers
+2018/06/27 18:23:21 Iteration 1
+2018/06/27 18:23:27 wait for partitioner
+2018/06/27 18:23:29 shutdown servers
+2018/06/27 18:23:30 restart servers
+2018/06/27 18:23:30 Iteration 2
+2018/06/27 18:23:36 wait for partitioner
+2018/06/27 18:23:37 shutdown servers
+2018/06/27 18:23:38 restart servers
+  ... Passed --  25.8  7 12293  513
+2018/06/27 18:23:38 Checking linearizability of 513 operations
+2018/06/27 18:23:38 Linearizability check done in 1.0001ms; result: true
+Test: InstallSnapshot RPC (3B) ...
+  ... Passed --   8.5  3  6265   63
+Test: snapshot size is reasonable (3B) ...
+  ... Passed --  61.0  3 10127  800
+Test: restarts, snapshots, one client (3B) ...
+  ... Passed --  20.0  5 21435  165
+Test: restarts, snapshots, many clients (3B) ...
+  ... Passed --  25.2  5 76472 3795
+Test: unreliable net, snapshots, many clients (3B) ...
+  ... Passed --  17.4  5  4049  507
+Test: unreliable net, restarts, snapshots, many clients (3B) ...
+2018/06/27 18:25:50 listen tcp 127.0.0.1:6060: bind: Only one usage of each s
+et address (protocol/network address/port) is normally permitted.
+  ... Passed --  22.3  5  5102  503
+Test: unreliable net, restarts, partitions, snapshots, many clients (3B) ...
+2018/06/27 18:26:12 listen tcp 127.0.0.1:6060: bind: Only one usage of each s
+et address (protocol/network address/port) is normally permitted.
+  ... Passed --  29.6  5  5213  252
+Test: unreliable net, restarts, partitions, snapshots, many clients, lineariz
+lity checks (3B) ...
+2018/06/27 18:26:42 Iteration 0
+2018/06/27 18:26:42 listen tcp 127.0.0.1:6060: bind: Only one usage of each s
+et address (protocol/network address/port) is normally permitted.
+2018/06/27 18:26:48 wait for partitioner
+2018/06/27 18:26:49 shutdown servers
+2018/06/27 18:26:50 restart servers
+2018/06/27 18:26:50 Iteration 1
+2018/06/27 18:26:56 wait for partitioner
+2018/06/27 18:26:58 shutdown servers
+2018/06/27 18:26:59 restart servers
+2018/06/27 18:26:59 Iteration 2
+2018/06/27 18:27:05 wait for partitioner
+2018/06/27 18:27:06 shutdown servers
+2018/06/27 18:27:07 restart servers
+  ... Passed --  25.0  7 13928  499
+2018/06/27 18:27:07 Checking linearizability of 499 operations
+2018/06/27 18:27:07 Linearizability check done in 3.0002ms; result: true
+PASS
+ok      kvdb/kvraft     457.574s
+
+D:\Computer Science\6.824\src\kvdb\kvraft>go test
+Test: one client (3A) ...
+labgob warning: Decoding into a non-default variable/field WrongLeader may no
+ork
+  ... Passed --  15.4  5  8786  165
+Test: many clients (3A) ...
+  ... Passed --  16.2  5 22347 1161
+Test: unreliable net, many clients (3A) ...
+  ... Passed --  17.3  5  3893  490
+Test: concurrent append to same key, unreliable (3A) ...
+  ... Passed --   2.0  3   248   52
+Test: progress in majority (3A) ...
+  ... Passed --   1.0  5   103    2
+Test: no progress in minority (3A) ...
+  ... Passed --   1.4  5   149    3
+Test: completion after heal (3A) ...
+  ... Passed --   1.1  5    59    3
+Test: partitions, one client (3A) ...
+  ... Passed --  22.3  5 18075  139
+Test: partitions, many clients (3A) ...
+  ... Passed --  23.8  5 65036  746
+Test: restarts, one client (3A) ...
+  ... Passed --  20.0  5 18402  166
+Test: restarts, many clients (3A) ...
+  ... Passed --  21.0  5 68242  825
+Test: unreliable net, restarts, many clients (3A) ...
+  ... Passed --  22.7  5  4933  500
+Test: restarts, partitions, many clients (3A) ...
+  ... Passed --  27.8  5 102216  670
+Test: unreliable net, restarts, partitions, many clients (3A) ...
+  ... Passed --  29.5  5  4886  252
+Test: unreliable net, restarts, partitions, many clients, linearizability che
+ (3A) ...
+2018/06/27 18:31:24 Iteration 0
+2018/06/27 18:31:30 wait for partitioner
+2018/06/27 18:31:32 shutdown servers
+2018/06/27 18:31:33 restart servers
+2018/06/27 18:31:33 Iteration 1
+2018/06/27 18:31:39 wait for partitioner
+2018/06/27 18:31:40 shutdown servers
+2018/06/27 18:31:41 restart servers
+2018/06/27 18:31:41 Iteration 2
+2018/06/27 18:31:47 wait for partitioner
+2018/06/27 18:31:49 shutdown servers
+2018/06/27 18:31:50 restart servers
+  ... Passed --  25.6  7 15174  420
+2018/06/27 18:31:50 Checking linearizability of 420 operations
+2018/06/27 18:31:50 Linearizability check done in 1ms; result: true
+Test: InstallSnapshot RPC (3B) ...
+  ... Passed --   8.2  3  6441   63
+Test: snapshot size is reasonable (3B) ...
+  ... Passed --  55.4  3  9949  800
+Test: restarts, snapshots, one client (3B) ...
+  ... Passed --  20.3  5 17268  165
+Test: restarts, snapshots, many clients (3B) ...
+  ... Passed --  25.1  5 81881 4281
+Test: unreliable net, snapshots, many clients (3B) ...
+  ... Passed --  18.1  5  4019  497
+Test: unreliable net, restarts, snapshots, many clients (3B) ...
+2018/06/27 18:33:57 listen tcp 127.0.0.1:6060: bind: Only one usage of each s
+et address (protocol/network address/port) is normally permitted.
+  ... Passed --  22.9  5  5072  495
+Test: unreliable net, restarts, partitions, snapshots, many clients (3B) ...
+2018/06/27 18:34:20 listen tcp 127.0.0.1:6060: bind: Only one usage of each s
+et address (protocol/network address/port) is normally permitted.
+  ... Passed --  29.2  5  4415  238
+Test: unreliable net, restarts, partitions, snapshots, many clients, lineariz
+lity checks (3B) ...
+2018/06/27 18:34:49 listen tcp 127.0.0.1:6060: bind: Only one usage of each s
+et address (protocol/network address/port) is normally permitted.
+2018/06/27 18:34:49 Iteration 0
+2018/06/27 18:34:55 wait for partitioner
+2018/06/27 18:34:57 shutdown servers
+2018/06/27 18:34:58 restart servers
+2018/06/27 18:34:58 Iteration 1
+2018/06/27 18:35:04 wait for partitioner
+2018/06/27 18:35:05 shutdown servers
+2018/06/27 18:35:06 restart servers
+2018/06/27 18:35:06 Iteration 2
+2018/06/27 18:35:12 wait for partitioner
+2018/06/27 18:35:13 shutdown servers
+2018/06/27 18:35:14 restart servers
+  ... Passed --  25.3  7 12856  584
+2018/06/27 18:35:14 Checking linearizability of 584 operations
+2018/06/27 18:35:14 Linearizability check done in 2.0002ms; result: true
+PASS
+ok      kvdb/kvraft     452.239s
+
+D:\Computer Science\6.824\src\kvdb\kvraft>go test
+Test: one client (3A) ...
+labgob warning: Decoding into a non-default variable/field WrongLeader may no
+ork
+  ... Passed --  15.4  5  6624  165
+Test: many clients (3A) ...
+  ... Passed --  16.2  5 21570  987
+Test: unreliable net, many clients (3A) ...
+  ... Passed --  17.5  5  3945  512
+Test: concurrent append to same key, unreliable (3A) ...
+  ... Passed --   2.1  3   251   52
+Test: progress in majority (3A) ...
+  ... Passed --   1.1  5   117    2
+Test: no progress in minority (3A) ...
+  ... Passed --   1.4  5   144    3
+Test: completion after heal (3A) ...
+  ... Passed --   1.1  5    57    3
+Test: partitions, one client (3A) ...
+  ... Passed --  22.6  5 14819  146
+Test: partitions, many clients (3A) ...
+  ... Passed --  23.6  5 26516  815
+Test: restarts, one client (3A) ...
+  ... Passed --  20.1  5 15486  164
+Test: restarts, many clients (3A) ...
+  ... Passed --  21.1  5 67573 1085
+Test: unreliable net, restarts, many clients (3A) ...
+  ... Passed --  22.7  5  4856  469
+Test: restarts, partitions, many clients (3A) ...
+  ... Passed --  28.7  5 58688  663
+Test: unreliable net, restarts, partitions, many clients (3A) ...
+  ... Passed --  29.6  5  4477  292
+Test: unreliable net, restarts, partitions, many clients, linearizability che
+ (3A) ...
+2018/06/27 18:43:12 Iteration 0
+2018/06/27 18:43:19 wait for partitioner
+2018/06/27 18:43:20 shutdown servers
+2018/06/27 18:43:21 restart servers
+2018/06/27 18:43:21 Iteration 1
+2018/06/27 18:43:27 wait for partitioner
+2018/06/27 18:43:29 shutdown servers
+2018/06/27 18:43:30 restart servers
+2018/06/27 18:43:30 Iteration 2
+2018/06/27 18:43:36 wait for partitioner
+2018/06/27 18:43:37 shutdown servers
+2018/06/27 18:43:38 restart servers
+  ... Passed --  25.7  7 16045  746
+2018/06/27 18:43:38 Checking linearizability of 746 operations
+2018/06/27 18:43:38 Linearizability check done in 1ms; result: true
+Test: InstallSnapshot RPC (3B) ...
+  ... Passed --   9.4  3  5340   63
+Test: snapshot size is reasonable (3B) ...
+  ... Passed --  68.5  3  9406  800
+Test: restarts, snapshots, one client (3B) ...
+  ... Passed --  20.3  5 23719  204
+Test: restarts, snapshots, many clients (3B) ...
+  ... Passed --  25.3  5 81108 4921
+Test: unreliable net, snapshots, many clients (3B) ...
+  ... Passed --  17.6  5  3982  497
+Test: unreliable net, restarts, snapshots, many clients (3B) ...
+2018/06/27 18:45:59 listen tcp 127.0.0.1:6060: bind: Only one usage of each s
+et address (protocol/network address/port) is normally permitted.
+  ... Passed --  22.6  5  5099  513
+Test: unreliable net, restarts, partitions, snapshots, many clients (3B) ...
+2018/06/27 18:46:22 listen tcp 127.0.0.1:6060: bind: Only one usage of each s
+et address (protocol/network address/port) is normally permitted.
+  ... Passed --  29.5  5  4372  284
+Test: unreliable net, restarts, partitions, snapshots, many clients, lineariz
+lity checks (3B) ...
+2018/06/27 18:46:52 Iteration 0
+2018/06/27 18:46:52 listen tcp 127.0.0.1:6060: bind: Only one usage of each s
+et address (protocol/network address/port) is normally permitted.
+2018/06/27 18:46:58 wait for partitioner
+2018/06/27 18:46:59 shutdown servers
+2018/06/27 18:47:00 restart servers
+2018/06/27 18:47:00 Iteration 1
+2018/06/27 18:47:06 wait for partitioner
+2018/06/27 18:47:08 shutdown servers
+2018/06/27 18:47:09 restart servers
+2018/06/27 18:47:09 Iteration 2
+2018/06/27 18:47:15 wait for partitioner
+2018/06/27 18:47:16 shutdown servers
+2018/06/27 18:47:17 restart servers
+  ... Passed --  25.5  7 13286  556
+2018/06/27 18:47:17 Checking linearizability of 556 operations
+2018/06/27 18:47:17 Linearizability check done in 2.0001ms; result: true
+PASS
+ok      kvdb/kvraft     468.311s
