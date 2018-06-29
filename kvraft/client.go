@@ -1,7 +1,7 @@
 package raftkv
 
 import (
-	//"time"
+	"time"
 	//"log"
 	"kvdb/labrpc"
 	"crypto/rand"
@@ -12,9 +12,9 @@ import (
 type Clerk struct {
 	servers []*labrpc.ClientEnd
 	// You will have to modify this struct.
-	lastLeader int64
+	lastLeader int
 	clientId int64
-	serialNum int64
+	serialNum int
 }
 
 func nrand() int64 {
@@ -50,28 +50,36 @@ func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 
 func (ck *Clerk) Get(key string) string {
 	// You will have to modify this function.
-	args := GetArgs {
-		Key : key,
-		ClientId : ck.clientId,
-		SerialNum : ck.serialNum,
-	}
+	cnt := len(ck.servers)
+	for {
+		args := GetArgs {
+			Key : key,
+			ClientId : ck.clientId,
+			SerialNum : ck.serialNum,
+		}
+		reply := GetReply{}
 
-	numOfInstances := int64(len(ck.servers))
-	index := ck.lastLeader
-	reply := GetReply{}
-
-	for reply.Err != OK {
-		ok := ck.servers[index % numOfInstances].Call("RaftKV.Get", &args, &reply)
-		if !ok || reply.WrongLeader {
-			index++
-		} else if reply.Err == ErrNoKey {
-			return ""
+		ck.lastLeader %= cnt
+		done := make(chan bool, 1)
+		go func() {
+			ok := ck.servers[ck.lastLeader].Call("RaftKV.Get", &args, &reply)
+			done <- ok
+		}()
+		select {
+		case <-time.After(200 * time.Millisecond): // rpc timeout: 200ms
+			ck.lastLeader++
+			continue
+		case ok := <-done:
+			if ok && !reply.WrongLeader {
+				ck.serialNum++
+				if reply.Err == OK {
+					return reply.Value
+				}
+				return ""
+			}
+			ck.lastLeader++
 		}
 	}
-
-	ck.serialNum++
-	ck.lastLeader = index % numOfInstances
-	return reply.Value
 }
 
 //
@@ -86,28 +94,35 @@ func (ck *Clerk) Get(key string) string {
 //
 func (ck *Clerk) PutAppend(key string, value string, op string) {
 	// You will have to modify this function.
-	args := PutAppendArgs {
-		Key : key,
-		Value : value,
-		Op : op,
-		ClientId : ck.clientId,
-		SerialNum : ck.serialNum,
-	}
-	//log.Println("args:", "key", args.Key, "value", args.Value, args.Op)
-	numOfInstances := int64(len(ck.servers))
-	index := ck.lastLeader	
+	cnt := len(ck.servers)
+	for {
+		args := PutAppendArgs {
+			Key : key,
+			Value : value,
+			Op : op,
+			ClientId : ck.clientId,
+			SerialNum : ck.serialNum,
+		}
+		reply := GetReply{}
 
-	reply := GetReply{}
-
-	for reply.Err != OK {
-		ok := ck.servers[index % numOfInstances].Call("RaftKV.PutAppend", &args, &reply)
-		if !ok || reply.WrongLeader {
-			index++
+		ck.lastLeader %= cnt
+		done := make(chan bool, 1)
+		go func() {
+			ok := ck.servers[ck.lastLeader].Call("RaftKV.PutAppend", &args, &reply)
+			done <- ok
+		}()
+		select {
+		case <-time.After(200 * time.Millisecond): // rpc timeout: 200ms
+			ck.lastLeader++
+			continue
+		case ok := <-done:
+			if ok && !reply.WrongLeader && reply.Err == OK {
+				ck.serialNum++
+				return
+			}
+			ck.lastLeader++
 		}
 	}
-
-	ck.serialNum++
-	ck.lastLeader = index % numOfInstances
 }
 
 func (ck *Clerk) Put(key string, value string) {

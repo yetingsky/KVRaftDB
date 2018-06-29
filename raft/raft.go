@@ -18,7 +18,7 @@ package raft
 //
 
 import (
-	//"log"
+	"log"
 	"kvdb/labgob"
 	"bytes"
 	"time"
@@ -221,7 +221,7 @@ func (rf *Raft) readPersist(data []byte) {
 	   d.Decode(&logs) != nil ||
 	   d.Decode(&lastSnapshotIndex) != nil || 
 	   d.Decode(&lastSnapshotTerm) != nil {
-	   //log.Println("Something bad is happening in decoder!")
+	   log.Println("Something bad is happening in decoder!")
 	} else {
 	  //rf.Lock()
 	  rf.term = currentTerm
@@ -693,7 +693,7 @@ func (rf *Raft) sendAppendEntries(s int, sendAppendChan chan struct{}) {
 				max = 1
 			}
 			rf.nextIndex[s] = max
-			sendAppendChan <- struct{}{}
+			//sendAppendChan <- struct{}{}
 		}
 	}	
 	rf.persist()
@@ -870,12 +870,7 @@ func (rf *Raft) findLogIndex(logIndex int) (int, bool) {
 }
 
 func (rf *Raft) startLocalApplyProcess(applyChan chan ApplyMsg) {
-	for {
-		if rf.isDecommissioned {
-			close(applyChan)
-			return
-		}
-		
+	for {		
 		rf.Lock()
 		cachedCommitIndex := rf.commitIndex
 		cachedLocalApplied := rf.lastApplied
@@ -928,12 +923,10 @@ func (rf *Raft) startLocalApplyProcess(applyChan chan ApplyMsg) {
 			}
 						
 		} else {
-			<-time.After(CommitApplyIdleCheckInterval)
-
 			if rf.isDecommissioned {
-				close(applyChan)
 				return
 			}
+			<-time.After(CommitApplyIdleCheckInterval)
 		}
 	}		
 }
@@ -1022,9 +1015,9 @@ func (rf *Raft) sendSnapshot(peerIndex int, sendAppendChan chan struct{}) {
 		}
 	}
 
-	go func() {
-		sendAppendChan <- struct{}{} // Signal to leader-peer process that there may be appends to send
-	}()
+	//go func() {
+	//	sendAppendChan <- struct{}{} // Signal to leader-peer process that there may be appends to send
+	//}()
 }
 
 // InstallSnapshot - RPC function
@@ -1062,7 +1055,7 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 	rf.lastSnapshotTerm = args.LastIncludedTerm
 
 	// LocalApplyProcess will pick this change up and send snapshot
-	//rf.lastApplied = 0 
+	rf.lastApplied = 0 
 
 	rf.persist()
 }
