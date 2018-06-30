@@ -1036,6 +1036,7 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 		rf.leaderID = args.LeaderId
 	}
 
+	if args.LastIncludedIndex <= rf.lastSnapshotIndex {
 		log.Println("Got duplicate snapshot!!!!")
 		return
 	}
