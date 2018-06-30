@@ -147,7 +147,7 @@ func (kv *RaftKV) Get(args *GetArgs, reply *GetReply) {
 			kv.mu.Unlock()
 			reply.WrongLeader = false
 			reply.Err = OK
-			reply.Value = dup.Reply.Value
+			reply.Value = kv.Kvmap[args.Key]
 			return
 		}
 	}
@@ -248,60 +248,66 @@ func (kv *RaftKV) raftStateSizeHitThreshold() bool {
 }
 
 func (kv *RaftKV) periodCheckApplyMsg() {
-	for m := range kv.applyCh {
-		//log.Println("locked in periodCheckApplyMsg")
-		kv.Lock()
-		//log.Println("unlocked in periodCheckApplyMsg")
+	for {
+		select {
+		case m, ok := <-kv.applyCh:
+			if ok {
+			//log.Println("locked in periodCheckApplyMsg")
+				kv.Lock()
+				//log.Println("unlocked in periodCheckApplyMsg")
 
-		if kv.isDecommissioned {
-			kv.UnLock()
-			return
-		}
+				if kv.isDecommissioned {
+					kv.UnLock()
+					return
+				}
 
-		// ApplyMsg might be a request to load snapshot
-		if m.UseSnapshot { 
-			kv.loadSnapshot(m.Snapshot)
-			kv.UnLock()
-			continue
-		}
-		
-		cmd := m.Command.(Op)
+				// ApplyMsg might be a request to load snapshot
+				if m.UseSnapshot { 
+					kv.loadSnapshot(m.Snapshot)
+					kv.UnLock()
+					continue
+				}
+				
+				cmd := m.Command.(Op)
 
-		// if we never process this client, or we never process this operation serial number
-		// then we have a new request, we need to process it
-		// Get request we do not care, handler will do the fetch.
-		// For Put or Append, we do it here.
-		if dup, ok := kv.duplicate[cmd.ClientId]; !ok || dup.Seq < cmd.SerialNum {
-			// save the client id and its serial number
-			switch cmd.Method {
-			case "Get":
-				kv.duplicate[cmd.ClientId] = &LatestReply{Seq: cmd.SerialNum,
-					Reply: GetReply{Value: kv.Kvmap[cmd.Key],}}
-			case "Put":
-				kv.Kvmap[cmd.Key] = cmd.Value
-				kv.duplicate[cmd.ClientId] = &LatestReply{Seq: cmd.SerialNum,}
-			case "Append":
-				kv.Kvmap[cmd.Key] += cmd.Value
-				kv.duplicate[cmd.ClientId] = &LatestReply{Seq: cmd.SerialNum,}
-			default:
-				panic("invalid command operation")
+				// if we never process this client, or we never process this operation serial number
+				// then we have a new request, we need to process it
+				// Get request we do not care, handler will do the fetch.
+				// For Put or Append, we do it here.
+				if dup, ok := kv.duplicate[cmd.ClientId]; !ok || dup.Seq < cmd.SerialNum {
+					// save the client id and its serial number
+					switch cmd.Method {
+					case "Get":
+						kv.duplicate[cmd.ClientId] = &LatestReply{Seq: cmd.SerialNum,
+							Reply: GetReply{Value: kv.Kvmap[cmd.Key],}}
+					case "Put":
+						kv.Kvmap[cmd.Key] = cmd.Value
+						kv.duplicate[cmd.ClientId] = &LatestReply{Seq: cmd.SerialNum,}
+					case "Append":
+						kv.Kvmap[cmd.Key] += cmd.Value
+						kv.duplicate[cmd.ClientId] = &LatestReply{Seq: cmd.SerialNum,}
+					default:
+						panic("invalid command operation")
+					}
+				}
+				
+				// When we have applied message, we found the waiting channel(issued by RPC handler), forward the Ops
+				if c, ok := kv.requestHandlers[m.CommandIndex]; ok {
+					c <- m
+				}
+
+				// Whenever key/value server detects that the Raft state size is approaching this threshold, 
+				// it should save a snapshot, and tell the Raft library that it has snapshotted, 
+				// so that Raft can discard old log entries. 
+				if kv.snapshotsEnabled && kv.raftStateSizeHitThreshold() {
+					//log.Println("we snapshot!")
+					kv.createSnapshot(m.CommandIndex)
+				}
+
+				kv.UnLock()
 			}
 		}
-		
-		// When we have applied message, we found the waiting channel(issued by RPC handler), forward the Ops
-		if c, ok := kv.requestHandlers[m.CommandIndex]; ok {
-			c <- m
-		}
 
-		// Whenever key/value server detects that the Raft state size is approaching this threshold, 
-		// it should save a snapshot, and tell the Raft library that it has snapshotted, 
-		// so that Raft can discard old log entries. 
-		if kv.snapshotsEnabled && kv.raftStateSizeHitThreshold() {
-			//log.Println("we snapshot!")
-			kv.createSnapshot(m.CommandIndex)
-		}
-
-		kv.UnLock()
 	}
 }
 
@@ -312,9 +318,6 @@ func (kv *RaftKV) periodCheckApplyMsg() {
 // turn off debug output from this instance.
 //
 func (kv *RaftKV) Kill() {
-	//kv.Lock()
-	//defer kv.UnLock()
-
 	kv.rf.Kill()
 	kv.isDecommissioned = true
 }
@@ -343,7 +346,7 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	kv.snapshotsEnabled = (maxraftstate != -1)
 
 	// You may need initialization code here.
-	kv.applyCh = make(chan raft.ApplyMsg)	
+	kv.applyCh = make(chan raft.ApplyMsg, 1000)	
 
 	// You may need initialization code here.
 	kv.Kvmap = make(map[string]string)

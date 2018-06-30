@@ -692,8 +692,13 @@ func (rf *Raft) sendAppendEntries(s int, sendAppendChan chan struct{}) {
 			if max < 1 {
 				max = 1
 			}
-			rf.nextIndex[s] = max
-			//sendAppendChan <- struct{}{}
+
+			if rf.lastSnapshotIndex != 0 && rf.nextIndex[s] <= rf.lastSnapshotIndex {
+				log.Println("we need to help this poor kid to catch up!")
+				rf.sendSnapshot(s, sendAppendChan)
+			} else {
+				rf.nextIndex[s] = max
+			}
 		}
 	}	
 	rf.persist()
@@ -1006,18 +1011,15 @@ func (rf *Raft) sendSnapshot(peerIndex int, sendAppendChan chan struct{}) {
 	ok := SendRPCRequest(request)
 	rf.Lock()
 	defer rf.UnLock()
-	if ok {
+	if ok && rf.state == Leader {
 		if reply.Term > rf.term {
 			rf.term = reply.Term
 			rf.turnToFollow()
 		} else {
 			rf.nextIndex[peerIndex] = req.LastIncludedIndex + 1
+			rf.matchIndex[peerIndex] = req.LastIncludedIndex
 		}
 	}
-
-	//go func() {
-	//	sendAppendChan <- struct{}{} // Signal to leader-peer process that there may be appends to send
-	//}()
 }
 
 // InstallSnapshot - RPC function
@@ -1032,6 +1034,10 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 		rf.term = args.Term
 		rf.turnToFollow()
 		rf.leaderID = args.LeaderId
+	}
+
+		log.Println("Got duplicate snapshot!!!!")
+		return
 	}
 
 	if rf.leaderID == args.LeaderId {
