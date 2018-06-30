@@ -52,6 +52,7 @@ type RaftKV struct {
 	isDecommissioned bool
 
 	// Your definitions here.
+	snapshotIndex int
 
 	Kvmap map[string]string
 
@@ -72,7 +73,11 @@ func (rf *RaftKV) UnLock() {
 func (kv *RaftKV) createSnapshot(logIndex int) {
 	w := new(bytes.Buffer)
 	e := labgob.NewEncoder(w)
+
+	kv.snapshotIndex = logIndex
+
 	e.Encode(kv.Kvmap)
+	e.Encode(kv.snapshotIndex)
 	e.Encode(kv.duplicate)
 	data := w.Bytes()
 	kv.rf.SaveSnapShot(data)
@@ -87,6 +92,7 @@ func (kv *RaftKV) loadSnapshot(data []byte) {
 	kvmap := make(map[string]string)
 	duplicate := make(map[int64]*LatestReply)
 	d.Decode(&kvmap)
+	d.Decode(&kv.snapshotIndex)
 	d.Decode(&duplicate)
 
 	kv.Kvmap = kvmap
@@ -106,7 +112,8 @@ func (kv *RaftKV) await(index int, op Op) (success bool) {
 		awaitChan = make(chan raft.ApplyMsg, 1)
 		kv.requestHandlers[index] = awaitChan
 	} else {
-		//log.Println("I encounter a god bug!")
+		log.Println("why again?????????")
+		return true
 	}
 	
 	kv.UnLock()
@@ -114,11 +121,8 @@ func (kv *RaftKV) await(index int, op Op) (success bool) {
 	for {
 		select {
 		case message := <-awaitChan:
-			kv.Lock()
-			delete(kv.requestHandlers, index)
-			kv.UnLock()
-
 			if index == message.CommandIndex && op == message.Command {
+				close(awaitChan)
 				return true
 			} else { 
 				// Message at index was not what we're expecting, must not be leader in majority partition
@@ -252,9 +256,7 @@ func (kv *RaftKV) periodCheckApplyMsg() {
 		select {
 		case m, ok := <-kv.applyCh:
 			if ok {
-			//log.Println("locked in periodCheckApplyMsg")
 				kv.Lock()
-				//log.Println("unlocked in periodCheckApplyMsg")
 
 				if kv.isDecommissioned {
 					kv.UnLock()
@@ -268,42 +270,46 @@ func (kv *RaftKV) periodCheckApplyMsg() {
 					continue
 				}
 				
-				cmd := m.Command.(Op)
+				if m.Command != nil && m.CommandIndex > kv.snapshotIndex {
+					cmd := m.Command.(Op)
 
-				// if we never process this client, or we never process this operation serial number
-				// then we have a new request, we need to process it
-				// Get request we do not care, handler will do the fetch.
-				// For Put or Append, we do it here.
-				if dup, ok := kv.duplicate[cmd.ClientId]; !ok || dup.Seq < cmd.SerialNum {
-					// save the client id and its serial number
-					switch cmd.Method {
-					case "Get":
-						kv.duplicate[cmd.ClientId] = &LatestReply{Seq: cmd.SerialNum,
-							Reply: GetReply{Value: kv.Kvmap[cmd.Key],}}
-					case "Put":
-						kv.Kvmap[cmd.Key] = cmd.Value
-						kv.duplicate[cmd.ClientId] = &LatestReply{Seq: cmd.SerialNum,}
-					case "Append":
-						kv.Kvmap[cmd.Key] += cmd.Value
-						kv.duplicate[cmd.ClientId] = &LatestReply{Seq: cmd.SerialNum,}
-					default:
-						panic("invalid command operation")
+					// if we never process this client, or we never process this operation serial number
+					// then we have a new request, we need to process it
+					// Get request we do not care, handler will do the fetch.
+					// For Put or Append, we do it here.
+					if dup, ok := kv.duplicate[cmd.ClientId]; !ok || dup.Seq < cmd.SerialNum {
+						// save the client id and its serial number
+						switch cmd.Method {
+						case "Get":
+							kv.duplicate[cmd.ClientId] = &LatestReply{Seq: cmd.SerialNum,
+								Reply: GetReply{Value: kv.Kvmap[cmd.Key],}}
+						case "Put":
+							kv.Kvmap[cmd.Key] = cmd.Value
+							kv.duplicate[cmd.ClientId] = &LatestReply{Seq: cmd.SerialNum,}
+						case "Append":
+							kv.Kvmap[cmd.Key] += cmd.Value
+							kv.duplicate[cmd.ClientId] = &LatestReply{Seq: cmd.SerialNum,}
+						default:
+							panic("invalid command operation")
+						}
 					}
-				}
-				
-				// When we have applied message, we found the waiting channel(issued by RPC handler), forward the Ops
-				if c, ok := kv.requestHandlers[m.CommandIndex]; ok {
-					c <- m
-				}
+					
+					// When we have applied message, we found the waiting channel(issued by RPC handler), forward the Ops
+					if c, ok := kv.requestHandlers[m.CommandIndex]; ok {
+						c <- m
+						delete(kv.requestHandlers, m.CommandIndex)
+					}
 
-				// Whenever key/value server detects that the Raft state size is approaching this threshold, 
-				// it should save a snapshot, and tell the Raft library that it has snapshotted, 
-				// so that Raft can discard old log entries. 
-				if kv.snapshotsEnabled && kv.raftStateSizeHitThreshold() {
-					//log.Println("we snapshot!")
-					kv.createSnapshot(m.CommandIndex)
+					// Whenever key/value server detects that the Raft state size is approaching this threshold, 
+					// it should save a snapshot, and tell the Raft library that it has snapshotted, 
+					// so that Raft can discard old log entries. 
+					if kv.snapshotsEnabled && kv.raftStateSizeHitThreshold() {
+						//log.Println("we snapshot!")
+						kv.createSnapshot(m.CommandIndex)
+					}
+				} else {
+					log.Println("Got duplicate index!!!! why did u do that")
 				}
-
 				kv.UnLock()
 			}
 		}

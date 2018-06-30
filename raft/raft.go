@@ -885,15 +885,14 @@ func (rf *Raft) startLocalApplyProcess(applyChan chan ApplyMsg) {
 			if rf.lastApplied < rf.lastSnapshotIndex {
 				//log.Println("we need to install snapshot")				
 
-				applyChan <- ApplyMsg{
-					UseSnapshot: true, 
-					Snapshot: rf.persister.ReadSnapshot(),
-				}
-				
 				rf.Lock()
 				rf.lastApplied = rf.lastSnapshotIndex
 				rf.UnLock()
 
+				applyChan <- ApplyMsg{
+					UseSnapshot: true, 
+					Snapshot: rf.persister.ReadSnapshot(),
+				}
 			} else {
 				rf.Lock()
 				startIndex, _ := rf.findLogIndex(rf.lastApplied + 1)
