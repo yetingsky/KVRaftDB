@@ -304,11 +304,10 @@ func (kv *RaftKV) periodCheckApplyMsg() {
 					// it should save a snapshot, and tell the Raft library that it has snapshotted, 
 					// so that Raft can discard old log entries. 
 					if kv.snapshotsEnabled && kv.raftStateSizeHitThreshold() {
-						//log.Println("we snapshot!")
 						kv.createSnapshot(m.CommandIndex)
 					}
 				} else {
-					log.Println("Got duplicate index!!!! why did u do that")
+					//log.Println("Got duplicate index!!!! why did u do that")
 				}
 				kv.UnLock()
 			}

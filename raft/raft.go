@@ -388,6 +388,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 			} else {
 				// test code
 				if rf.log[i].Cmd != args.Entries[entryIndex].Cmd {
+					//log.Println("what what?")
 					rf.log[i].Cmd = args.Entries[entryIndex].Cmd
 				}				
 				entryIndex++
@@ -884,14 +885,15 @@ func (rf *Raft) startLocalApplyProcess(applyChan chan ApplyMsg) {
 			if rf.lastApplied < rf.lastSnapshotIndex {
 				//log.Println("we need to install snapshot")				
 
-				rf.Lock()
-				rf.lastApplied = rf.lastSnapshotIndex
-				rf.UnLock()
-
 				applyChan <- ApplyMsg{
 					UseSnapshot: true, 
 					Snapshot: rf.persister.ReadSnapshot(),
 				}
+				
+				rf.Lock()
+				rf.lastApplied = rf.lastSnapshotIndex
+				rf.UnLock()
+
 			} else {
 				rf.Lock()
 				startIndex, _ := rf.findLogIndex(rf.lastApplied + 1)
@@ -992,7 +994,7 @@ func (rf *Raft) sendSnapshot(peerIndex int, sendAppendChan chan struct{}) {
 
 	req := InstallSnapshotArgs{
 		Term:              rf.term,
-		LeaderId:          rf.leaderID,
+		LeaderId:          rf.me,
 		LastIncludedIndex: rf.lastSnapshotIndex,
 		LastIncludedTerm:  rf.lastSnapshotTerm,
 		Data:              rf.persister.ReadSnapshot(),
