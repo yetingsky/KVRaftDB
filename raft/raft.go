@@ -388,7 +388,6 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 			} else {
 				// test code
 				if rf.log[i].Cmd != args.Entries[entryIndex].Cmd {
-					//log.Println("what what?")
 					rf.log[i].Cmd = args.Entries[entryIndex].Cmd
 				}				
 				entryIndex++
@@ -1075,7 +1074,9 @@ func (rf *Raft) CompactLog(lastLogIndex int) {
 		rf.lastSnapshotIndex = entry.Index
 		rf.lastSnapshotTerm = entry.Term
 		
-		rf.log = rf.log[i+1:]
+		// rf.log = rf.log[i+1:]
+		// let's try make last log index at 0
+		rf.log = rf.log[i:]
 	}
 
 	rf.persist()
