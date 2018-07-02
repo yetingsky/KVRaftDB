@@ -385,12 +385,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 				// delete extra inconsistent entries, exclude the current i since it is inconsistent
 				rf.log = rf.log[:i]
 				break;
-			} else {
-				// test code
-				if rf.log[i].Cmd != args.Entries[entryIndex].Cmd {
-					//log.Println("what what?")
-					rf.log[i].Cmd = args.Entries[entryIndex].Cmd
-				}				
+			} else {	
 				entryIndex++
 			}
 		}
@@ -535,7 +530,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	
 	rf.persist()
 
-	//rf.debug("add command %v", command, entry)
+	rf.debug("add command %v", command, entry)
 	return entry.Index, rf.term, true
 }
 
@@ -740,7 +735,7 @@ func (rf *Raft) becomeLeader() {
 	rf.Lock()
 	rf.state = Leader
 	rf.leaderID = rf.me
-	rf.debug("I am a leader!")
+	//rf.debug("I am a leader!")
 
 	rf.nextIndex = make([]int, len(rf.peers))
 	rf.matchIndex = make([]int, len(rf.peers))

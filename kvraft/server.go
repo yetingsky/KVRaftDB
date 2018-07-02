@@ -189,7 +189,6 @@ func (kv *RaftKV) Get(args *GetArgs, reply *GetReply) {
 
 func (kv *RaftKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	// Your code here.
-
 	if _, isLeader := kv.rf.GetState(); !isLeader {
 		reply.WrongLeader = true
 		reply.Err = ""
@@ -226,10 +225,8 @@ func (kv *RaftKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 		if !success {
 			reply.WrongLeader = true
 		} else {
-			kv.Lock()
 			reply.WrongLeader = false
 			reply.Err = OK
-			kv.UnLock()
 		}
 
 	}

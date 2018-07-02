@@ -124,6 +124,7 @@ func TestBasic(t *testing.T) {
 
 	for s := 0; s < nservers; s++ {
 		cfg.ShutdownServer(s)
+		//fmt.Printf("  Shutdownserver %d\n", s)
 		for i := 0; i < len(cfa); i++ {
 			c := ck.Query(cfa[i].Num)
 			check_same_config(t, c, cfa[i])
@@ -247,6 +248,7 @@ func TestBasic(t *testing.T) {
 	}
 
 	fmt.Printf("  ... Passed\n")
+
 }
 
 func TestMulti(t *testing.T) {
