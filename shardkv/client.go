@@ -8,11 +8,14 @@ package shardkv
 // talks to the group that holds the key's shard.
 //
 
-import "labrpc"
-import "crypto/rand"
-import "math/big"
-import "shardmaster"
-import "time"
+import (
+	//"log"
+	"kvdb/labrpc"
+	"crypto/rand"
+	"math/big"
+	"kvdb/shardmaster"
+	"time"
+)
 
 //
 // which shard is a key in?
@@ -40,6 +43,10 @@ type Clerk struct {
 	config   shardmaster.Config
 	make_end func(string) *labrpc.ClientEnd
 	// You will have to modify this struct.
+
+	//lastLeader int
+	clientId int64
+	serialNum int
 }
 
 //
@@ -56,6 +63,9 @@ func MakeClerk(masters []*labrpc.ClientEnd, make_end func(string) *labrpc.Client
 	ck.sm = shardmaster.MakeClerk(masters)
 	ck.make_end = make_end
 	// You'll have to add code here.
+
+	ck.clientId = nrand()
+	ck.serialNum = 0
 	return ck
 }
 
@@ -66,8 +76,11 @@ func MakeClerk(masters []*labrpc.ClientEnd, make_end func(string) *labrpc.Client
 // You will have to modify this function.
 //
 func (ck *Clerk) Get(key string) string {
-	args := GetArgs{}
-	args.Key = key
+	args := GetArgs {
+		Key : key,
+		ClientId : ck.clientId,
+		SerialNum : ck.serialNum,
+	}
 
 	for {
 		shard := key2shard(key)
@@ -79,6 +92,7 @@ func (ck *Clerk) Get(key string) string {
 				var reply GetReply
 				ok := srv.Call("ShardKV.Get", &args, &reply)
 				if ok && reply.WrongLeader == false && (reply.Err == OK || reply.Err == ErrNoKey) {
+					ck.serialNum++
 					return reply.Value
 				}
 				if ok && (reply.Err == ErrWrongGroup) {
@@ -99,11 +113,13 @@ func (ck *Clerk) Get(key string) string {
 // You will have to modify this function.
 //
 func (ck *Clerk) PutAppend(key string, value string, op string) {
-	args := PutAppendArgs{}
-	args.Key = key
-	args.Value = value
-	args.Op = op
-
+	args := PutAppendArgs {
+		Key : key,
+		Value : value,
+		Op : op,
+		ClientId : ck.clientId,
+		SerialNum : ck.serialNum,
+	}
 
 	for {
 		shard := key2shard(key)
@@ -114,6 +130,8 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 				var reply PutAppendReply
 				ok := srv.Call("ShardKV.PutAppend", &args, &reply)
 				if ok && reply.WrongLeader == false && reply.Err == OK {
+					//log.Println("Got result from", si)
+					ck.serialNum++
 					return
 				}
 				if ok && reply.Err == ErrWrongGroup {

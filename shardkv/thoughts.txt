@@ -1,0 +1,7 @@
+when config change related to my group:
+send shard migration RPC to correct leader of the target group
+send raft command to let my followers remove the shard from its owningShardMap
+
+Upon receive the migration RPC,
+new group updates kvmap, other data
+send raft command to let all followers add shard to its owningShardMap, and update data

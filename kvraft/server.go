@@ -35,10 +35,12 @@ type Op struct {
 	SerialNum int
 }
 
+/*
 type LatestReply struct {
 	Seq   int      // latest request
 	Reply GetReply // latest reply
 }
+*/
 
 type RaftKV struct {
 	mu      sync.Mutex
@@ -57,7 +59,7 @@ type RaftKV struct {
 	Kvmap map[string]string
 
 	// duplication detection table
-	duplicate map[int64]*LatestReply
+	duplicate map[int64]int
 
 	requestHandlers map[int]chan raft.ApplyMsg
 }
@@ -90,7 +92,7 @@ func (kv *RaftKV) loadSnapshot(data []byte) {
 	r := bytes.NewBuffer(data)
 	d := labgob.NewDecoder(r)
 	kvmap := make(map[string]string)
-	duplicate := make(map[int64]*LatestReply)
+	duplicate := make(map[int64]int)
 	d.Decode(&kvmap)
 	d.Decode(&kv.snapshotIndex)
 	d.Decode(&duplicate)
@@ -106,30 +108,32 @@ func (kv *RaftKV) loadSnapshot(data []byte) {
 // 如果是当初pass in的command, 直接trigger RPC handler
 // 最后就是处理好正确或者错误的Case之后删除channel
 func (kv *RaftKV) await(index int, op Op) (success bool) {
-	kv.Lock()	
-	awaitChan, ok := kv.requestHandlers[index]
-	if !ok {
-		awaitChan = make(chan raft.ApplyMsg, 1)
-		kv.requestHandlers[index] = awaitChan
-	} else {
-		log.Println("why again?????????")
-		return true
-	}
-	
+	kv.Lock()
+	awaitChan := make(chan raft.ApplyMsg, 1)
+	kv.requestHandlers[index] = awaitChan	
 	kv.UnLock()
 
 	for {
 		select {
 		case message := <-awaitChan:
-			if index == message.CommandIndex && op == message.Command {
-				close(awaitChan)
+			kv.Lock()
+			delete(kv.requestHandlers, index)
+			kv.UnLock()
+
+			if index == message.CommandIndex && op == message.Command {				
 				return true
 			} else { 
 				// Message at index was not what we're expecting, must not be leader in majority partition
 				return false
 			}
-		case <-time.After(800 * time.Millisecond):
-			return false
+		case <-time.After(10 * time.Millisecond):
+			kv.Lock()
+			if _, isLeader := kv.rf.GetState(); !isLeader {
+				delete(kv.requestHandlers, index)
+				kv.UnLock()
+				return false
+			}
+			kv.UnLock()
 		}
 	}
 }
@@ -137,21 +141,21 @@ func (kv *RaftKV) await(index int, op Op) (success bool) {
 
 func (kv *RaftKV) Get(args *GetArgs, reply *GetReply) {
 	// Your code here.
-
-	if _, isLeader := kv.rf.GetState(); !isLeader {
+	kv.Lock()
+	/*if _, isLeader := kv.rf.GetState(); !isLeader {
+		kv.UnLock()
 		reply.WrongLeader = true
 		reply.Err = ""
 		return
-	}
+	}*/
 
-	kv.Lock()
 	if dup, ok := kv.duplicate[args.ClientId]; ok {
 		// filter duplicate
-		if args.SerialNum <= dup.Seq {
-			kv.mu.Unlock()
+		if args.SerialNum <= dup {
 			reply.WrongLeader = false
 			reply.Err = OK
 			reply.Value = kv.Kvmap[args.Key]
+			kv.UnLock()
 			return
 		}
 	}
@@ -189,17 +193,18 @@ func (kv *RaftKV) Get(args *GetArgs, reply *GetReply) {
 
 func (kv *RaftKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	// Your code here.
-	if _, isLeader := kv.rf.GetState(); !isLeader {
+	kv.Lock()
+	/*if _, isLeader := kv.rf.GetState(); !isLeader {
+		kv.UnLock()
 		reply.WrongLeader = true
 		reply.Err = ""
 		return
-	}
+	}*/
 
-	kv.Lock()
 	// duplicate put/append request
 	if dup, ok := kv.duplicate[args.ClientId]; ok {
 		// filter duplicate
-		if args.SerialNum <= dup.Seq {
+		if args.SerialNum <= dup {
 			kv.UnLock()
 			reply.WrongLeader = false
 			reply.Err = OK
@@ -274,18 +279,17 @@ func (kv *RaftKV) periodCheckApplyMsg() {
 					// then we have a new request, we need to process it
 					// Get request we do not care, handler will do the fetch.
 					// For Put or Append, we do it here.
-					if dup, ok := kv.duplicate[cmd.ClientId]; !ok || dup.Seq < cmd.SerialNum {
+					if dup, ok := kv.duplicate[cmd.ClientId]; !ok || dup < cmd.SerialNum {
 						// save the client id and its serial number
 						switch cmd.Method {
 						case "Get":
-							kv.duplicate[cmd.ClientId] = &LatestReply{Seq: cmd.SerialNum,
-								Reply: GetReply{Value: kv.Kvmap[cmd.Key],}}
+							kv.duplicate[cmd.ClientId] = cmd.SerialNum
 						case "Put":
 							kv.Kvmap[cmd.Key] = cmd.Value
-							kv.duplicate[cmd.ClientId] = &LatestReply{Seq: cmd.SerialNum,}
+							kv.duplicate[cmd.ClientId] = cmd.SerialNum
 						case "Append":
 							kv.Kvmap[cmd.Key] += cmd.Value
-							kv.duplicate[cmd.ClientId] = &LatestReply{Seq: cmd.SerialNum,}
+							kv.duplicate[cmd.ClientId] = cmd.SerialNum
 						default:
 							panic("invalid command operation")
 						}
@@ -294,18 +298,18 @@ func (kv *RaftKV) periodCheckApplyMsg() {
 					// When we have applied message, we found the waiting channel(issued by RPC handler), forward the Ops
 					if c, ok := kv.requestHandlers[m.CommandIndex]; ok {
 						c <- m
-						delete(kv.requestHandlers, m.CommandIndex)
-					}
-
-					// Whenever key/value server detects that the Raft state size is approaching this threshold, 
-					// it should save a snapshot, and tell the Raft library that it has snapshotted, 
-					// so that Raft can discard old log entries. 
-					if kv.snapshotsEnabled && kv.raftStateSizeHitThreshold() {
-						kv.createSnapshot(m.CommandIndex)
 					}
 				} else {
 					//log.Println("Got duplicate index!!!! why did u do that")
 				}
+
+				// Whenever key/value server detects that the Raft state size is approaching this threshold, 
+				// it should save a snapshot, and tell the Raft library that it has snapshotted, 
+				// so that Raft can discard old log entries. 
+				if kv.snapshotsEnabled && kv.raftStateSizeHitThreshold() {
+					kv.createSnapshot(m.CommandIndex)
+				}
+
 				kv.UnLock()
 			}
 		}
@@ -348,17 +352,15 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	kv.snapshotsEnabled = (maxraftstate != -1)
 
 	// You may need initialization code here.
-	kv.applyCh = make(chan raft.ApplyMsg, 1000)	
-
-	// You may need initialization code here.
+	kv.applyCh = make(chan raft.ApplyMsg)
 	kv.Kvmap = make(map[string]string)
-	kv.duplicate = make(map[int64]*LatestReply)
-
+	kv.duplicate = make(map[int64]int)
 	kv.requestHandlers = make(map[int]chan raft.ApplyMsg)
 
 	if data := persister.ReadSnapshot(); kv.snapshotsEnabled && data != nil && len(data) > 0 {
 		kv.loadSnapshot(data)
 	}
+	
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
 
 	go kv.periodCheckApplyMsg()

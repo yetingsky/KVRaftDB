@@ -1,7 +1,7 @@
 package shardkv
 
-import "shardmaster"
-import "labrpc"
+import "kvdb/shardmaster"
+import "kvdb/labrpc"
 import "testing"
 import "os"
 
@@ -12,7 +12,7 @@ import "math/rand"
 import "encoding/base64"
 import "sync"
 import "runtime"
-import "raft"
+import "kvdb/raft"
 import "strconv"
 import "fmt"
 import "time"

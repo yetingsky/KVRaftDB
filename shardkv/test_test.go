@@ -1,14 +1,17 @@
 package shardkv
 
-import "linearizability"
+import (
+	"log"
+	"kvdb/linearizability"
 
-import "testing"
-import "strconv"
-import "time"
-import "fmt"
-import "sync/atomic"
-import "sync"
-import "math/rand"
+	"testing"
+	"strconv"
+	"time"
+	"fmt"
+	"sync/atomic"
+	"sync"
+	"math/rand"
+)
 
 const linearizabilityCheckTimeout = 1 * time.Second
 
@@ -48,6 +51,7 @@ func TestStaticShards(t *testing.T) {
 	// make sure that the data really is sharded by
 	// shutting down one shard and checking that some
 	// Get()s don't succeed.
+	log.Println("Shutdown group 1")
 	cfg.ShutdownGroup(1)
 	cfg.checklogs() // forbid snapshots
 

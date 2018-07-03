@@ -101,8 +101,8 @@ type Raft struct {
 }
 
 func (rf *Raft) debug(format string, a ...interface{}) {
-	//args := append([]interface{}{rf.me, rf.term, rf.state}, a...)
-	//log.Printf("[INFO] Raft:[Id:%d|Term:%d|State:%s|] " + format, args...)
+	args := append([]interface{}{rf.me, rf.term, rf.state}, a...)
+	log.Printf("[INFO] Raft:[Id:%d|Term:%d|State:%s|] " + format, args...)
 }
 
 func (rf *Raft) Me() int {
@@ -530,7 +530,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	
 	rf.persist()
 
-	rf.debug("add command %v", command, entry)
+	//rf.debug("add command %v", command, entry)
 	return entry.Index, rf.term, true
 }
 
@@ -595,7 +595,7 @@ func (rf *Raft) sendAppendEntries(s int, sendAppendChan chan struct{}) {
 		if rf.nextIndex[s] <= rf.lastSnapshotIndex {
 			//log.Println("!!!!!!INSTALL SNAPSHOT", rf.nextIndex[s], "vs", rf.lastSnapshotIndex)
 			rf.UnLock()
-			rf.sendSnapshot(s, sendAppendChan)
+			go rf.sendSnapshot(s, sendAppendChan)
 			return
 		}
 
@@ -682,17 +682,17 @@ func (rf *Raft) sendAppendEntries(s int, sendAppendChan chan struct{}) {
 				rf.updateCommitIndex()
 			}	
 		} else {
-			// go back to conflict log index minus one, so we are safe. but the lowest index is 1.
-			max := reply.ConflictingLogIndex-1
-			if max < 1 {
-				max = 1
-			}
-
 			if rf.lastSnapshotIndex != 0 && rf.nextIndex[s] <= rf.lastSnapshotIndex {
 				log.Println("we need to help this poor kid to catch up!")
-				rf.sendSnapshot(s, sendAppendChan)
+				go rf.sendSnapshot(s, sendAppendChan)
 			} else {
+				// go back to conflict log index minus one, so we are safe. but the lowest index is 1.
+				max := reply.ConflictingLogIndex-1
+				if max < 1 {
+					max = 1
+				}
 				rf.nextIndex[s] = max
+				sendAppendChan <- struct{}{} // Signals to leader-peer process that appends need to occur
 			}
 		}
 	}	
@@ -750,10 +750,10 @@ func (rf *Raft) becomeLeader() {
 		rf.Lock()
 		rf.nextIndex[p] = rf.getLastLogIndex() + 1 // Should be initialized to leader's last log index + 1
 		rf.matchIndex[p] = 0              // Index of highest log entry known to be replicated on server
-		rf.UnLock()
 
 		rf.sendAppendChan[p] = make(chan struct{}, 1)		
-
+		rf.UnLock()
+		
 		go rf.appendEntriesLoopForPeer(p, rf.sendAppendChan[p])
 	}
 }
@@ -874,10 +874,11 @@ func (rf *Raft) startLocalApplyProcess(applyChan chan ApplyMsg) {
 		rf.Lock()
 		cachedCommitIndex := rf.commitIndex
 		cachedLocalApplied := rf.lastApplied
+		cachedSnapshotIndex := rf.lastSnapshotIndex
 		rf.UnLock()
 
 		if cachedCommitIndex >= 0 && cachedCommitIndex > cachedLocalApplied {
-			if rf.lastApplied < rf.lastSnapshotIndex {
+			if cachedLocalApplied < cachedSnapshotIndex {
 				//log.Println("we need to install snapshot")				
 
 				applyChan <- ApplyMsg{
@@ -886,7 +887,7 @@ func (rf *Raft) startLocalApplyProcess(applyChan chan ApplyMsg) {
 				}
 				
 				rf.Lock()
-				rf.lastApplied = rf.lastSnapshotIndex
+				rf.lastApplied = cachedSnapshotIndex
 				rf.UnLock()
 
 			} else {
@@ -904,7 +905,9 @@ func (rf *Raft) startLocalApplyProcess(applyChan chan ApplyMsg) {
 
 				if endIndex >= 0 { // We have some entries to locally commit
 					entries := make([]Log, endIndex-startIndex+1)
+					rf.Lock()
 					copy(entries, rf.log[startIndex:endIndex+1])
+					rf.UnLock()
 
 					// Hold no locks so that slow local applies don't deadlock the system
 					//rf.UnLock()
@@ -917,15 +920,12 @@ func (rf *Raft) startLocalApplyProcess(applyChan chan ApplyMsg) {
 					}
 					rf.Lock()
 					rf.lastApplied += len(entries)
-					rf.UnLock();
+					rf.UnLock()
 				}
 
 			}
 						
 		} else {
-			if rf.isDecommissioned {
-				return
-			}
 			<-time.After(CommitApplyIdleCheckInterval)
 		}
 	}		
@@ -1003,7 +1003,7 @@ func (rf *Raft) sendSnapshot(peerIndex int, sendAppendChan chan struct{}) {
 		return rf.installSnapshot(peerIndex, req, reply)
 	}
 
-	ok := SendRPCRequest(request)
+	ok := SendSnapshotRPCRequest(request)
 	rf.Lock()
 	defer rf.UnLock()
 	if ok && rf.state == Leader {
@@ -1012,7 +1012,9 @@ func (rf *Raft) sendSnapshot(peerIndex int, sendAppendChan chan struct{}) {
 			rf.turnToFollow()
 		} else {
 			rf.nextIndex[peerIndex] = req.LastIncludedIndex + 1
-			rf.matchIndex[peerIndex] = req.LastIncludedIndex
+			//rf.matchIndex[peerIndex] = req.LastIncludedIndex
+
+			sendAppendChan <- struct{}{} // Signal to leader-peer process that there may be appends to send
 		}
 	}
 }
@@ -1031,10 +1033,11 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 		rf.leaderID = args.LeaderId
 	}
 
+	/*
 	if args.LastIncludedIndex <= rf.lastSnapshotIndex {
 		log.Println("Got duplicate snapshot!!!!")
 		return
-	}
+	}*/
 
 	if rf.leaderID == args.LeaderId {
 		rf.lastHeartBeat = time.Now()

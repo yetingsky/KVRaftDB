@@ -66,7 +66,7 @@ func (ck *Clerk) Get(key string) string {
 			done <- ok
 		}()
 		select {
-		case <-time.After(200 * time.Millisecond): // rpc timeout: 200ms
+		case <-time.After(150 * time.Millisecond): // rpc timeout: 200ms
 			ck.lastLeader++
 			continue
 		case ok := <-done:
@@ -112,7 +112,7 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 			done <- ok
 		}()
 		select {
-		case <-time.After(200 * time.Millisecond): // rpc timeout: 200ms
+		case <-time.After(150 * time.Millisecond): // rpc timeout: 200ms
 			ck.lastLeader++
 			continue
 		case ok := <-done:
