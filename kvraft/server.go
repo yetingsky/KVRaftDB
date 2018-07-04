@@ -82,10 +82,10 @@ func (kv *RaftKV) createSnapshot(logIndex int) {
 	e.Encode(kv.snapshotIndex)
 	e.Encode(kv.duplicate)
 	data := w.Bytes()
-	kv.rf.SaveSnapShot(data)
+	kv.rf.PersistAndSaveSnapshot(logIndex, data)
 
 	// Compact raft log til index.
-	kv.rf.CompactLog(logIndex)
+	//kv.rf.CompactLog(logIndex)
 }
 
 func (kv *RaftKV) loadSnapshot(data []byte) {
@@ -237,6 +237,16 @@ func (kv *RaftKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	}
 }
 
+func (kv *RaftKV) snapshot(lastCommandIndex int) {
+	w := new(bytes.Buffer)
+	e := labgob.NewEncoder(w)
+	e.Encode(kv.Kvmap)
+	e.Encode(kv.snapshotIndex)
+	e.Encode(kv.duplicate)
+	snapshot := w.Bytes()
+	kv.rf.PersistAndSaveSnapshot(lastCommandIndex, snapshot)
+}
+
 func (kv *RaftKV) raftStateSizeHitThreshold() bool {
 	if kv.maxraftstate < 0 {
 		return false
@@ -251,6 +261,13 @@ func (kv *RaftKV) raftStateSizeHitThreshold() bool {
 		return true
 	}
 	return false
+}
+
+func (kv *RaftKV) snapshotIfNeeded(lastCommandIndex int) {
+	var threshold = int(1.5 * float64(kv.maxraftstate))
+	if kv.maxraftstate != -1 && kv.rf.GetRaftStateSize() >= threshold {
+		kv.snapshot(lastCommandIndex)
+	}
 }
 
 func (kv *RaftKV) periodCheckApplyMsg() {
@@ -306,9 +323,7 @@ func (kv *RaftKV) periodCheckApplyMsg() {
 				// Whenever key/value server detects that the Raft state size is approaching this threshold, 
 				// it should save a snapshot, and tell the Raft library that it has snapshotted, 
 				// so that Raft can discard old log entries. 
-				if kv.snapshotsEnabled && kv.raftStateSizeHitThreshold() {
-					kv.createSnapshot(m.CommandIndex)
-				}
+				kv.snapshotIfNeeded(m.CommandIndex)
 
 				kv.UnLock()
 			}

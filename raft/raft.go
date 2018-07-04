@@ -98,6 +98,9 @@ type Raft struct {
 	//snapshot states
 	lastSnapshotIndex int
 	lastSnapshotTerm int
+
+	shutdown          chan struct{}       // shutdown gracefully
+	notifyApplyCh     chan struct{}       // notify to apply
 }
 
 func (rf *Raft) debug(format string, a ...interface{}) {
@@ -138,7 +141,40 @@ func (rf *Raft) GetState() (int, bool) {
 	return t, isLeader
 }
 
-func (rf *Raft) SaveSnapShot(snapshot[] byte) {
+func (rf *Raft) getPersistState() []byte {
+	w := new(bytes.Buffer)
+	e := labgob.NewEncoder(w)
+
+	e.Encode(rf.term)
+	e.Encode(rf.votedFor)
+	e.Encode(rf.log)
+	e.Encode(rf.lastSnapshotIndex)
+	e.Encode(rf.lastSnapshotTerm)
+
+	data := w.Bytes()
+	return data
+}
+
+// because snapshot will replace committed log entries in log
+// thus the length of rf.log is different from(less than or equal) rf.logIndex
+func (rf *Raft) getOffsetIndex(i int) int {
+	return i - rf.lastSnapshotIndex
+}
+
+func (rf *Raft) PersistAndSaveSnapshot(lastIncludedIndex int, snapshot [] byte) {
+	rf.Lock()
+	defer rf.UnLock()
+	if lastIncludedIndex > rf.lastSnapshotIndex {
+		truncationStartIndex := rf.getOffsetIndex(lastIncludedIndex)
+		rf.log = append([]Log{}, rf.log[truncationStartIndex:]...) // log entry previous at lastIncludedIndex at 0 now
+		rf.lastSnapshotIndex = lastIncludedIndex
+		data := rf.getPersistState()
+		rf.persister.SaveStateAndSnapshot(data, snapshot)
+	}
+}
+
+
+func (rf *Raft) SaveSnapShot1(snapshot[] byte) {
 	w := new(bytes.Buffer)
 	e := labgob.NewEncoder(w)
 	e.Encode(rf.term)
@@ -396,6 +432,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		}
 
 		// Update the commit index
+		oldCommitIndex := rf.commitIndex
 		if args.LeaderCommit > rf.commitIndex {
 			var latestLogIndex = rf.lastSnapshotIndex
 			if len(rf.log) > 0 {
@@ -407,6 +444,9 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 			} else {
 				rf.commitIndex = latestLogIndex
 			}
+		}
+		if rf.commitIndex > oldCommitIndex {
+			rf.notifyApplyCh <- struct{}{}
 		}
 
 		reply.Success = true
@@ -545,6 +585,7 @@ func (rf *Raft) Kill() {
 	//rf.Lock()
 	//defer rf.UnLock()
 	rf.isDecommissioned = true
+	close(rf.shutdown)
 }
 
 func (rf *Raft) updateCommitIndex() {
@@ -571,6 +612,7 @@ func (rf *Raft) updateCommitIndex() {
 		if count > len(rf.peers)/2 {
 			rf.commitIndex = v.Index
 			//log.Println(rf.me, "peer got commit index", rf.commitIndex, "count is", count, "peer num is", len(rf.peers)/2)
+			rf.notifyApplyCh <- struct{}{}
 			break
 		}
 		i--
@@ -589,15 +631,16 @@ func (rf *Raft) sendAppendEntries(s int, sendAppendChan chan struct{}) {
 	preLogTerm := 0
 	lastLogIndex,_ := rf.getLastLogEntry()
 
+	if rf.nextIndex[s] > 0 && rf.nextIndex[s] <= rf.lastSnapshotIndex {
+		//log.Println("!!!!!!INSTALL SNAPSHOT", rf.nextIndex[s], "vs", rf.lastSnapshotIndex)
+		rf.UnLock()
+		go rf.sendSnapshot(s, sendAppendChan)
+		return
+	}
+
 	// if we have log entry, and our logs contain nextIndex[s]
 	if lastLogIndex > 0 && lastLogIndex >= rf.nextIndex[s] {
 
-		if rf.nextIndex[s] <= rf.lastSnapshotIndex {
-			//log.Println("!!!!!!INSTALL SNAPSHOT", rf.nextIndex[s], "vs", rf.lastSnapshotIndex)
-			rf.UnLock()
-			go rf.sendSnapshot(s, sendAppendChan)
-			return
-		}
 
 		// send all missing entries!
 		for i, v := range rf.log {
@@ -684,7 +727,7 @@ func (rf *Raft) sendAppendEntries(s int, sendAppendChan chan struct{}) {
 		} else {
 			if rf.lastSnapshotIndex != 0 && rf.nextIndex[s] <= rf.lastSnapshotIndex {
 				log.Println("we need to help this poor kid to catch up!")
-				go rf.sendSnapshot(s, sendAppendChan)
+				rf.sendSnapshot(s, sendAppendChan)
 			} else {
 				// go back to conflict log index minus one, so we are safe. but the lowest index is 1.
 				max := reply.ConflictingLogIndex-1
@@ -870,63 +913,64 @@ func (rf *Raft) findLogIndex(logIndex int) (int, bool) {
 }
 
 func (rf *Raft) startLocalApplyProcess(applyChan chan ApplyMsg) {
-	for {		
-		rf.Lock()
-		cachedCommitIndex := rf.commitIndex
-		cachedLocalApplied := rf.lastApplied
-		cachedSnapshotIndex := rf.lastSnapshotIndex
-		rf.UnLock()
+	for {
+		select {
+		case <-rf.notifyApplyCh:
+			
+			rf.Lock()
+			cachedCommitIndex := rf.commitIndex
+			cachedLocalApplied := rf.lastApplied
+			cachedSnapshotIndex := rf.lastSnapshotIndex
+			rf.UnLock()
 
-		if cachedCommitIndex >= 0 && cachedCommitIndex > cachedLocalApplied {
-			if cachedLocalApplied < cachedSnapshotIndex {
-				//log.Println("we need to install snapshot")				
+			if cachedCommitIndex >= 0 && cachedCommitIndex > cachedLocalApplied {
+				if cachedLocalApplied < cachedSnapshotIndex {
+					//log.Println("we need to install snapshot")				
 
-				applyChan <- ApplyMsg{
-					UseSnapshot: true, 
-					Snapshot: rf.persister.ReadSnapshot(),
-				}
-				
-				rf.Lock()
-				rf.lastApplied = cachedSnapshotIndex
-				rf.UnLock()
-
-			} else {
-				rf.Lock()
-				startIndex, _ := rf.findLogIndex(rf.lastApplied + 1)
-				startIndex = Max(startIndex, 0) // If start index wasn't found, it's because it's a part of a snapshot
-
-				endIndex := -1
-				for i := startIndex; i < len(rf.log); i++ {
-					if rf.log[i].Index <= rf.commitIndex {
-						endIndex = i
+					applyChan <- ApplyMsg{
+						UseSnapshot: true, 
+						Snapshot: rf.persister.ReadSnapshot(),
 					}
-				}
-				rf.UnLock()
-
-				if endIndex >= 0 { // We have some entries to locally commit
-					entries := make([]Log, endIndex-startIndex+1)
+					
 					rf.Lock()
-					copy(entries, rf.log[startIndex:endIndex+1])
+					rf.lastApplied = cachedSnapshotIndex
 					rf.UnLock()
 
-					// Hold no locks so that slow local applies don't deadlock the system
-					//rf.UnLock()
-					for _, v := range entries { 
-						applyChan <- ApplyMsg{
-							CommandIndex: v.Index, 
-							Command: v.Cmd,
-							CommandValid : true,
+				} else {
+					rf.Lock()
+					startIndex, _ := rf.findLogIndex(rf.lastApplied + 1)
+					startIndex = Max(startIndex, 0) // If start index wasn't found, it's because it's a part of a snapshot
+
+					endIndex := -1
+					for i := startIndex; i < len(rf.log); i++ {
+						if rf.log[i].Index <= rf.commitIndex {
+							endIndex = i
 						}
 					}
-					rf.Lock()
-					rf.lastApplied += len(entries)
+
+					if endIndex >= 0 { // We have some entries to locally commit
+						entries := make([]Log, endIndex-startIndex+1)
+						copy(entries, rf.log[startIndex:endIndex+1])
+						rf.UnLock()
+
+						// Hold no locks so that slow local applies don't deadlock the system
+						for _, v := range entries { 
+							applyChan <- ApplyMsg{
+								CommandIndex: v.Index, 
+								Command: v.Cmd,
+								CommandValid : true,
+							}
+						}
+						rf.Lock()
+						rf.lastApplied += len(entries)
+					}
 					rf.UnLock()
 				}
 
+
 			}
-						
-		} else {
-			<-time.After(CommitApplyIdleCheckInterval)
+		case <-rf.shutdown:
+			return
 		}
 	}		
 }
@@ -961,6 +1005,9 @@ func Make(peers []*labrpc.ClientEnd, me int,
 
 	rf.lastSnapshotIndex = 0
 	rf.lastSnapshotTerm = 0
+
+	rf.notifyApplyCh = make(chan struct{}, 10000)
+	rf.shutdown = make(chan struct{})
 
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
@@ -1033,35 +1080,26 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 		rf.leaderID = args.LeaderId
 	}
 
-	/*
-	if args.LastIncludedIndex <= rf.lastSnapshotIndex {
-		log.Println("Got duplicate snapshot!!!!")
-		return
-	}*/
-
 	if rf.leaderID == args.LeaderId {
 		rf.lastHeartBeat = time.Now()
 	}
 
-	// Save snapshot, discarding any existing snapshot with smaller index
-	rf.SaveSnapShot(args.Data) 
-
-	i, isPresent := rf.findLogIndex(args.LastIncludedIndex)
-	if isPresent && rf.log[i].Term == args.LastIncludedTerm {
-		// If existing log entry has same index and term as snapshot’s last included entry, retain log entries following it
-		// Paper page 12
-		rf.log = rf.log[i+1:]
-	} else { 
-		// Otherwise discard the entire log
-		rf.log = make([]Log, 0)
+	if args.LastIncludedIndex > rf.lastSnapshotIndex {
+		truncationStartIndex := rf.getOffsetIndex(args.LastIncludedIndex)
+		rf.lastSnapshotIndex = args.LastIncludedIndex
+		oldCommitIndex := rf.commitIndex
+		rf.commitIndex = Max(rf.commitIndex, rf.lastSnapshotIndex)
+		//rf.logIndex = Max(rf.logIndex, rf.lastSnapshotIndex+1)
+		if truncationStartIndex < len(rf.log) { // snapshot contain a prefix of its log
+			rf.log = append(rf.log[truncationStartIndex:])
+		} else { // snapshot contain new information not already in the follower's log
+			rf.log = []Log{} // discards entire log
+		}
+		rf.persister.SaveStateAndSnapshot(rf.getPersistState(), args.Data)
+		if rf.commitIndex > oldCommitIndex {
+			rf.notifyApplyCh <- struct{}{}
+		}
 	}
-
-	rf.lastSnapshotIndex = args.LastIncludedIndex
-	rf.lastSnapshotTerm = args.LastIncludedTerm
-
-	// LocalApplyProcess will pick this change up and send snapshot
-	rf.lastApplied = 0 
-
 	rf.persist()
 }
 
