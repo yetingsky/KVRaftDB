@@ -51,8 +51,6 @@ type RaftKV struct {
 	maxraftstate int // snapshot if log grows this big
 	snapshotsEnabled bool
 
-	isDecommissioned bool
-
 	// Your definitions here.
 	snapshotIndex int
 
@@ -62,6 +60,7 @@ type RaftKV struct {
 	duplicate map[int64]int
 
 	requestHandlers map[int]chan raft.ApplyMsg
+	shutdown chan struct{}
 }
 
 func (rf *RaftKV) Lock() {
@@ -116,49 +115,24 @@ func (kv *RaftKV) await(index int, op Op) (success bool) {
 	for {
 		select {
 		case message := <-awaitChan:
-			kv.Lock()
-			delete(kv.requestHandlers, index)
-			kv.UnLock()
-
 			if index == message.CommandIndex && op == message.Command {				
 				return true
 			} else { 
 				// Message at index was not what we're expecting, must not be leader in majority partition
 				return false
 			}
-		case <-time.After(10 * time.Millisecond):
+		case <-time.After(2 * time.Second):
 			kv.Lock()
-			if _, isLeader := kv.rf.GetState(); !isLeader {
-				delete(kv.requestHandlers, index)
-				kv.UnLock()
-				return false
-			}
+			delete(kv.requestHandlers, index)
 			kv.UnLock()
+			return false
 		}
 	}
 }
 
-
 func (kv *RaftKV) Get(args *GetArgs, reply *GetReply) {
 	// Your code here.
 	kv.Lock()
-	/*if _, isLeader := kv.rf.GetState(); !isLeader {
-		kv.UnLock()
-		reply.WrongLeader = true
-		reply.Err = ""
-		return
-	}*/
-
-	if dup, ok := kv.duplicate[args.ClientId]; ok {
-		// filter duplicate
-		if args.SerialNum <= dup {
-			reply.WrongLeader = false
-			reply.Err = OK
-			reply.Value = kv.Kvmap[args.Key]
-			kv.UnLock()
-			return
-		}
-	}
 
 	ops := Op {
 		Method : "Get",
@@ -172,6 +146,7 @@ func (kv *RaftKV) Get(args *GetArgs, reply *GetReply) {
 
 	if !isLeader {
 		reply.WrongLeader = true
+		reply.Err = ""
 	} else {
 		success := kv.await(index, ops)
 		if !success {
@@ -194,23 +169,6 @@ func (kv *RaftKV) Get(args *GetArgs, reply *GetReply) {
 func (kv *RaftKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	// Your code here.
 	kv.Lock()
-	/*if _, isLeader := kv.rf.GetState(); !isLeader {
-		kv.UnLock()
-		reply.WrongLeader = true
-		reply.Err = ""
-		return
-	}*/
-
-	// duplicate put/append request
-	if dup, ok := kv.duplicate[args.ClientId]; ok {
-		// filter duplicate
-		if args.SerialNum <= dup {
-			kv.UnLock()
-			reply.WrongLeader = false
-			reply.Err = OK
-			return
-		}
-	}
 
 	ops := Op{
 		Method : args.Op,
@@ -225,6 +183,7 @@ func (kv *RaftKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 
 	if !isLeader {
 		reply.WrongLeader = true
+		reply.Err = ""
 	} else {
 		success := kv.await(index, ops)
 		if !success {
@@ -273,14 +232,8 @@ func (kv *RaftKV) snapshotIfNeeded(lastCommandIndex int) {
 func (kv *RaftKV) periodCheckApplyMsg() {
 	for {
 		select {
-		case m, ok := <-kv.applyCh:
-			if ok {
+		case m := <-kv.applyCh:
 				kv.Lock()
-
-				if kv.isDecommissioned {
-					kv.UnLock()
-					return
-				}
 
 				// ApplyMsg might be a request to load snapshot
 				if m.UseSnapshot { 
@@ -289,7 +242,7 @@ func (kv *RaftKV) periodCheckApplyMsg() {
 					continue
 				}
 				
-				if m.Command != nil && m.CommandIndex > kv.snapshotIndex {
+				if m.CommandValid {
 					cmd := m.Command.(Op)
 
 					// if we never process this client, or we never process this operation serial number
@@ -314,19 +267,17 @@ func (kv *RaftKV) periodCheckApplyMsg() {
 					
 					// When we have applied message, we found the waiting channel(issued by RPC handler), forward the Ops
 					if c, ok := kv.requestHandlers[m.CommandIndex]; ok {
+						delete(kv.requestHandlers, m.CommandIndex)
 						c <- m
 					}
-				} else {
-					//log.Println("Got duplicate index!!!! why did u do that")
+					// Whenever key/value server detects that the Raft state size is approaching this threshold, 
+					// it should save a snapshot, and tell the Raft library that it has snapshotted, 
+					// so that Raft can discard old log entries. 
+					kv.snapshotIfNeeded(m.CommandIndex)
 				}
-
-				// Whenever key/value server detects that the Raft state size is approaching this threshold, 
-				// it should save a snapshot, and tell the Raft library that it has snapshotted, 
-				// so that Raft can discard old log entries. 
-				kv.snapshotIfNeeded(m.CommandIndex)
-
 				kv.UnLock()
-			}
+		case <- kv.shutdown:
+			return
 		}
 
 	}
@@ -340,7 +291,7 @@ func (kv *RaftKV) periodCheckApplyMsg() {
 //
 func (kv *RaftKV) Kill() {
 	kv.rf.Kill()
-	kv.isDecommissioned = true
+	close(kv.shutdown)
 }
 
 //
@@ -371,6 +322,8 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	kv.Kvmap = make(map[string]string)
 	kv.duplicate = make(map[int64]int)
 	kv.requestHandlers = make(map[int]chan raft.ApplyMsg)
+
+	kv.shutdown = make(chan struct{})
 
 	if data := persister.ReadSnapshot(); kv.snapshotsEnabled && data != nil && len(data) > 0 {
 		kv.loadSnapshot(data)

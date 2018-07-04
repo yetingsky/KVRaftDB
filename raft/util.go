@@ -15,7 +15,7 @@ func DPrintf(format string, a ...interface{}) (n int, err error) {
 	return
 }
 
-const RPCMaxTries = 3
+const RPCMaxTries = 2
 const RPCTimeout = 50 * time.Millisecond
 
 

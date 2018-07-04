@@ -725,21 +725,16 @@ func (rf *Raft) sendAppendEntries(s int, sendAppendChan chan struct{}) {
 				rf.updateCommitIndex()
 			}	
 		} else {
-			if rf.lastSnapshotIndex != 0 && rf.nextIndex[s] <= rf.lastSnapshotIndex {
-				log.Println("we need to help this poor kid to catch up!")
-				rf.sendSnapshot(s, sendAppendChan)
-			} else {
-				// go back to conflict log index minus one, so we are safe. but the lowest index is 1.
-				max := reply.ConflictingLogIndex-1
-				if max < 1 {
-					max = 1
-				}
-				rf.nextIndex[s] = max
-				sendAppendChan <- struct{}{} // Signals to leader-peer process that appends need to occur
+			// go back to conflict log index minus one, so we are safe. but the lowest index is 1.
+			max := reply.ConflictingLogIndex-1
+			if max < 1 {
+				max = 1
 			}
+			rf.nextIndex[s] = max
+			sendAppendChan <- struct{}{} // Signals to leader-peer process that appends need to occur
 		}
 	}	
-	rf.persist()
+	//rf.persist()
 }
 
 func (rf *Raft) appendEntriesLoopForPeer(server int, sendAppendChan chan struct{}) {
@@ -794,7 +789,7 @@ func (rf *Raft) becomeLeader() {
 		rf.nextIndex[p] = rf.getLastLogIndex() + 1 // Should be initialized to leader's last log index + 1
 		rf.matchIndex[p] = 0              // Index of highest log entry known to be replicated on server
 
-		rf.sendAppendChan[p] = make(chan struct{}, 1)		
+		rf.sendAppendChan[p] = make(chan struct{}, 1000)		
 		rf.UnLock()
 		
 		go rf.appendEntriesLoopForPeer(p, rf.sendAppendChan[p])
@@ -930,6 +925,7 @@ func (rf *Raft) startLocalApplyProcess(applyChan chan ApplyMsg) {
 					applyChan <- ApplyMsg{
 						UseSnapshot: true, 
 						Snapshot: rf.persister.ReadSnapshot(),
+						CommandValid : false,
 					}
 					
 					rf.Lock()
@@ -956,6 +952,7 @@ func (rf *Raft) startLocalApplyProcess(applyChan chan ApplyMsg) {
 						// Hold no locks so that slow local applies don't deadlock the system
 						for _, v := range entries { 
 							applyChan <- ApplyMsg{
+								UseSnapshot: false, 
 								CommandIndex: v.Index, 
 								Command: v.Cmd,
 								CommandValid : true,
@@ -1053,13 +1050,13 @@ func (rf *Raft) sendSnapshot(peerIndex int, sendAppendChan chan struct{}) {
 	ok := SendSnapshotRPCRequest(request)
 	rf.Lock()
 	defer rf.UnLock()
-	if ok && rf.state == Leader {
+	if ok {
 		if reply.Term > rf.term {
 			rf.term = reply.Term
 			rf.turnToFollow()
 		} else {
 			rf.nextIndex[peerIndex] = req.LastIncludedIndex + 1
-			//rf.matchIndex[peerIndex] = req.LastIncludedIndex
+			rf.matchIndex[peerIndex] = req.LastIncludedIndex
 
 			sendAppendChan <- struct{}{} // Signal to leader-peer process that there may be appends to send
 		}
@@ -1078,6 +1075,7 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 		rf.term = args.Term
 		rf.turnToFollow()
 		rf.leaderID = args.LeaderId
+		rf.votedFor = args.LeaderId
 	}
 
 	if rf.leaderID == args.LeaderId {
@@ -1099,8 +1097,8 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 		if rf.commitIndex > oldCommitIndex {
 			rf.notifyApplyCh <- struct{}{}
 		}
-	}
-	rf.persist()
+		rf.persist()
+	}	
 }
 
 func (rf *Raft) CompactLog(lastLogIndex int) {
