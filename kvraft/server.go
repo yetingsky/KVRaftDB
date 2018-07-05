@@ -83,7 +83,7 @@ func (kv *RaftKV) loadSnapshot(data []byte) {
 // 现在的实现是一个general await api, 每隔Interval检查一下还是不是leader。 或者applied index committed消息抵达
 // 如果是当初pass in的command, 直接trigger RPC handler
 // 最后就是处理好正确或者错误的Case之后删除channel
-func (kv *RaftKV) await(index int, op Op) (success bool) {
+func (kv *RaftKV) await(index int, term int, op Op) (success bool) {
 	kv.Lock()
 	awaitChan := make(chan raft.ApplyMsg, 1)
 	kv.requestHandlers[index] = awaitChan	
@@ -92,7 +92,7 @@ func (kv *RaftKV) await(index int, op Op) (success bool) {
 	for {
 		select {
 		case message := <-awaitChan:
-			if index == message.CommandIndex && op == message.Command {				
+			if index == message.CommandIndex && term == message.CommandTerm {				
 				return true
 			} else { 
 				// Message at index was not what we're expecting, must not be leader in majority partition
@@ -125,13 +125,13 @@ func (kv *RaftKV) Get(args *GetArgs, reply *GetReply) {
 	}
 	kv.UnLock()
 	
-	index, _, isLeader := kv.rf.Start(ops)
+	index, term, isLeader := kv.rf.Start(ops)
 
 	if !isLeader {
 		reply.WrongLeader = true
 		reply.Err = ""
 	} else {
-		success := kv.await(index, ops)
+		success := kv.await(index, term, ops)
 		if !success {
 			reply.WrongLeader = true
 		} else {
@@ -180,13 +180,13 @@ func (kv *RaftKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 
 	kv.UnLock()
 
-	index, _, isLeader := kv.rf.Start(ops)
+	index, term, isLeader := kv.rf.Start(ops)
 
 	if !isLeader {
 		reply.WrongLeader = true
 		reply.Err = ""
 	} else {
-		success := kv.await(index, ops)
+		success := kv.await(index, term, ops)
 		if !success {
 			reply.WrongLeader = true
 		} else {

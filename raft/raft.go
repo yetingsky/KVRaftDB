@@ -47,6 +47,7 @@ type ApplyMsg struct {
 	CommandValid bool
 	Command      interface{}
 	CommandIndex int
+	CommandTerm int
 	UseSnapshot  bool
 	Snapshot    []byte
 }
@@ -993,6 +994,7 @@ func (rf *Raft) startLocalApplyProcess(applyChan chan ApplyMsg) {
 						applyChan <- ApplyMsg{
 							UseSnapshot: false, 
 							CommandIndex: v.Index, 
+							CommandTerm: v.Term,
 							Command: v.Cmd,
 							CommandValid : true,
 						}
