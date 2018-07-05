@@ -132,7 +132,7 @@ func (kv *RaftKV) Get(args *GetArgs, reply *GetReply) {
 		SerialNum : args.SerialNum,
 	}
 
-	if dup, ok := kv.duplicate[args.ClientId]; ok {
+	/*if dup, ok := kv.duplicate[args.ClientId]; ok {
 		// filter duplicate
 		if args.SerialNum == dup {
 			reply.WrongLeader = false
@@ -141,7 +141,7 @@ func (kv *RaftKV) Get(args *GetArgs, reply *GetReply) {
 			kv.UnLock()
 			return
 		}
-	}
+	}*/
 
 	kv.UnLock()
 	
