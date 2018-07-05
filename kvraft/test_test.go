@@ -705,9 +705,6 @@ func TestSnapshotUnreliable3B(t *testing.T) {
 }
 
 func TestSnapshotUnreliableRecover3B(t *testing.T) {
-	go func() {
-		log.Println(http.ListenAndServe("localhost:6060", nil))
-	}()
 	// Test: unreliable net, restarts, snapshots, many clients (3B) ...
 	GenericTest(t, "3B", 5, true, true, false, 1000)
 }
@@ -718,11 +715,6 @@ func TestSnapshotUnreliableRecoverConcurrentPartition3B(t *testing.T) {
 }
 
 func TestSnapshotUnreliableRecoverConcurrentPartitionLinearizable3B(t *testing.T) {
-
-	go func() {
-		log.Println(http.ListenAndServe("localhost:6060", nil))
-	}()
-
 	// Test: unreliable net, restarts, partitions, snapshots, linearizability checks (3B) ...
 	GenericTestLinearizability(t, "3B", 15, 7, true, true, true, 1000)
 }

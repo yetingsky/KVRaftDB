@@ -106,8 +106,8 @@ type Raft struct {
 }
 
 func (rf *Raft) debug(format string, a ...interface{}) {
-	args := append([]interface{}{rf.me, rf.term, rf.state}, a...)
-	log.Printf("[INFO] Raft:[Id:%d|Term:%d|State:%s|] " + format, args...)
+	//args := append([]interface{}{rf.me, rf.term, rf.state}, a...)
+	//log.Printf("[INFO] Raft:[Id:%d|Term:%d|State:%s|] " + format, args...)
 }
 
 func (rf *Raft) Me() int {
@@ -203,13 +203,6 @@ func (rf *Raft) GetRaftStateSize() int {
 //
 func (rf *Raft) persist() {
 	// Your code here (2C).
-	// Example:
-	// w := new(bytes.Buffer)
-	// e := labgob.NewEncoder(w)
-	// e.Encode(rf.xxx)
-	// e.Encode(rf.yyy)
-	// data := w.Bytes()
-	// rf.persister.SaveRaftState(data)
 
 	w := new(bytes.Buffer)
 	e := labgob.NewEncoder(w)
@@ -230,19 +223,6 @@ func (rf *Raft) readPersist(data []byte) {
 	if data == nil || len(data) < 1 { // bootstrap without any state?
 		return
 	}
-	// Your code here (2C).
-	// Example:
-	// r := bytes.NewBuffer(data)
-	// d := labgob.NewDecoder(r)
-	// var xxx
-	// var yyy
-	// if d.Decode(&xxx) != nil ||
-	//    d.Decode(&yyy) != nil {
-	//   error...
-	// } else {
-	//   rf.xxx = xxx
-	//   rf.yyy = yyy
-	// }
 	
 	r := bytes.NewBuffer(data)
 	d := labgob.NewDecoder(r)
@@ -320,7 +300,6 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		rf.term = args.Term
 	}
 
-	//log.Println(rf.me, "before got vote ask", args, "updateTodate?", updateToDate, "my term is", rf.term, "my voted is to", rf.votedFor, "did I vote?", reply.VoteGranted/*, rf.log*/)
 	if args.Term < rf.term {
 		reply.VoteGranted = false		
 	} else if (rf.votedFor == -1 || args.CandidateId == rf.votedFor) && updateToDate {
@@ -329,7 +308,6 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		// restart election timer if we voted someone. This caused unreliable test random fail
 		rf.lastHeartBeat = time.Now()
 	} 
-	//log.Println(rf.me, "after got vote ask", args, "updateTodate?", updateToDate, "my term is", rf.term, "my voted is to", rf.votedFor, "did I vote?", reply.VoteGranted/*, rf.log*/)
 	DPrintf("%d is requested vote for %d. His term %d, last log index %d, last log term %d, but our term %d, lastsnapshot index %d, lastsnapshot term %d, is log updated? %t. did I vote? %t",
 		rf.me, args.CandidateId, args.Term, args.LastLogIndex, args.LastLogTerm, rf.term, rf.lastSnapshotIndex, rf.lastSnapshotTerm, updateToDate, reply.VoteGranted)
 	
@@ -388,13 +366,13 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		rf.lastHeartBeat = time.Now()
 	}
 
-	
+	// Critical code: If the leader's matchIndex[us] < our lastsnapshot index, we send leader our lastSnapshot + 1
+	// so leader will track nextIndex[us] = lastSnapshot + 1, this fixed the infinity loop
 	if args.PreLogIndex < rf.lastSnapshotIndex {
 		reply.Success = false
 		reply.ConflictingLogIndex = rf.lastSnapshotIndex + 1
 		return
 	}
-
 
 	// find args.PreLogIndex position in current log
 	// Note: preIndex is -1 in two cases:
@@ -474,7 +452,6 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 				break
 			}
 		}
-
 		reply.Success = false
 	}
 	DPrintf("%d receives entries from leader %d, his term %d, prevLogIndex %d, prevLogTerm %d, leaderCommint %d, but our term %d, lastsnapshotIndex %d, lastsnapshotTerm %d our commitIndex %d. our reply conflict index is %d. Reply success? %t",
@@ -658,7 +635,6 @@ func (rf *Raft) sendAppendEntries(s int, sendAppendChan chan struct{}) {
 
 	// if we have log entry, and our logs contain nextIndex[s]
 	if lastLogIndex > 0 && lastLogIndex >= rf.nextIndex[s] {
-
 		// send all missing entries!
 		for i, v := range rf.log {
 			// current i plus 1 is the log index. Only proceed if we are currently at next index for peer
@@ -1169,7 +1145,7 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 		rf.lastSnapshotTerm = args.LastIncludedTerm // add snapshot term!
 		oldCommitIndex := rf.commitIndex
 		rf.commitIndex = Max(rf.commitIndex, rf.lastSnapshotIndex)
-		//rf.logIndex = Max(rf.logIndex, rf.lastSnapshotIndex+1)
+
 		if truncationStartIndex < len(rf.log) { // snapshot contain a prefix of its log
 			rf.log = append(rf.log[truncationStartIndex:])
 		} else { // snapshot contain new information not already in the follower's log
@@ -1183,22 +1159,3 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 		rf.persist()
 	}	
 }
-
-/*
-func (rf *Raft) CompactLog(lastLogIndex int) {
-	rf.Lock()
-	defer rf.UnLock()
-
-	if i, isPresent := rf.findLogIndex(lastLogIndex); isPresent {
-		entry := rf.log[i]
-		rf.lastSnapshotIndex = entry.Index
-		rf.lastSnapshotTerm = entry.Term
-		
-		// rf.log = rf.log[i+1:]
-		// let's try make last log index at 0
-		rf.log = rf.log[i:]
-	}
-
-	rf.persist()
-}
-*/

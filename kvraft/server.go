@@ -23,7 +23,6 @@ func DPrintf(format string, a ...interface{}) (n int, err error) {
 	return
 }
 
-
 type Op struct {
 	// Your definitions here.
 	// Field names must start with capital letters,
@@ -34,13 +33,6 @@ type Op struct {
 	ClientId int64
 	SerialNum int64
 }
-
-/*
-type LatestReply struct {
-	Seq   int      // latest request
-	Reply GetReply // latest reply
-}
-*/
 
 type RaftKV struct {
 	mu      sync.Mutex
@@ -106,7 +98,7 @@ func (kv *RaftKV) await(index int, op Op) (success bool) {
 				// Message at index was not what we're expecting, must not be leader in majority partition
 				return false
 			}
-		case <-time.After(2 * time.Second):
+		case <-time.After(800 * time.Millisecond):
 			kv.Lock()
 			delete(kv.requestHandlers, index)
 			kv.UnLock()
@@ -131,18 +123,6 @@ func (kv *RaftKV) Get(args *GetArgs, reply *GetReply) {
 		ClientId : args.ClientId,
 		SerialNum : args.SerialNum,
 	}
-
-	/*if dup, ok := kv.duplicate[args.ClientId]; ok {
-		// filter duplicate
-		if args.SerialNum == dup {
-			reply.WrongLeader = false
-			reply.Err = OK
-			reply.Value = kv.Kvmap[args.Key]
-			kv.UnLock()
-			return
-		}
-	}*/
-
 	kv.UnLock()
 	
 	index, _, isLeader := kv.rf.Start(ops)
@@ -232,6 +212,7 @@ func (kv *RaftKV) snapshot(lastCommandIndex int) {
 	kv.rf.PersistAndSaveSnapshot(lastCommandIndex, snapshot)
 }
 
+/*
 func (kv *RaftKV) raftStateSizeHitThreshold() bool {
 	if kv.maxraftstate < 0 {
 		return false
@@ -246,7 +227,7 @@ func (kv *RaftKV) raftStateSizeHitThreshold() bool {
 		return true
 	}
 	return false
-}
+}*/
 
 func (kv *RaftKV) snapshotIfNeeded(lastCommandIndex int) {
 	var threshold = int(0.9 * float64(kv.maxraftstate))
@@ -346,16 +327,13 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	kv.Kvmap = make(map[string]string)
 	kv.duplicate = make(map[int64]int64)
 	kv.requestHandlers = make(map[int]chan raft.ApplyMsg)
-
 	kv.shutdown = make(chan struct{})
 
 	if data := persister.ReadSnapshot(); kv.snapshotsEnabled && data != nil && len(data) > 0 {
 		kv.loadSnapshot(data)
-	}
-	
+	}	
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
 
-	//go kv.rf.Replay()
 	go kv.periodCheckApplyMsg()
 
 	return kv
