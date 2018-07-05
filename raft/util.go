@@ -26,7 +26,7 @@ func SendRPCRequest(request func() bool) bool {
 		}
 	}
 
-	for attempts := 0; attempts < 3; attempts++ {
+	for attempts := 0; attempts < 1; attempts++ {
 		rpcChan := make(chan struct{}, 1)
 		go makeRequest(rpcChan)
 		select {
