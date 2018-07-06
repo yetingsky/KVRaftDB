@@ -44,12 +44,12 @@ type RaftKV struct {
 	snapshotsEnabled bool
 
 	// Your definitions here.
-	snapshotIndex int
+	SnapshotIndex int
 
 	Kvmap map[string]string
 
 	// duplication detection table
-	duplicate map[int64]int64
+	Duplicate map[int64]int64
 
 	requestHandlers map[int]chan raft.ApplyMsg
 	shutdown chan struct{}
@@ -69,12 +69,12 @@ func (kv *RaftKV) loadSnapshot(data []byte) {
 	kvmap := make(map[string]string)
 	duplicate := make(map[int64]int64)
 	d.Decode(&kvmap)
-	d.Decode(&kv.snapshotIndex)
+	d.Decode(&kv.SnapshotIndex)
 	d.Decode(&duplicate)
 
-	DPrintf("%d load snapshot, snapshotIndex is %d, kvmap size is %d, duplciate map size is %d", kv.me, kv.snapshotIndex, len(kvmap), len(duplicate))
+	DPrintf("%d load snapshot, snapshotIndex is %d, kvmap size is %d, duplciate map size is %d", kv.me, kv.SnapshotIndex, len(kvmap), len(duplicate))
 	kv.Kvmap = kvmap
-	kv.duplicate = duplicate
+	kv.Duplicate = duplicate
 }
 
 
@@ -168,7 +168,7 @@ func (kv *RaftKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	}
 
 	// duplicate put/append request
-	if dup, ok := kv.duplicate[args.ClientId]; ok {
+	if dup, ok := kv.Duplicate[args.ClientId]; ok {
 		// filter duplicate
 		if args.SerialNum == dup {
 			kv.UnLock()
@@ -198,16 +198,16 @@ func (kv *RaftKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 }
 
 func (kv *RaftKV) snapshot(lastCommandIndex int) {
-	if kv.snapshotIndex != lastCommandIndex {
+	if kv.SnapshotIndex != lastCommandIndex {
 		DPrintf("%d raftkv server current snapshot index is %d, going to create snapshot for index %d",
-			kv.me, kv.snapshotIndex, lastCommandIndex)
+			kv.me, kv.SnapshotIndex, lastCommandIndex)
 	}
-	kv.snapshotIndex = lastCommandIndex
+	kv.SnapshotIndex = lastCommandIndex
 	w := new(bytes.Buffer)
 	e := labgob.NewEncoder(w)
 	e.Encode(kv.Kvmap)
-	e.Encode(kv.snapshotIndex)
-	e.Encode(kv.duplicate)
+	e.Encode(kv.SnapshotIndex)
+	e.Encode(kv.Duplicate)
 	snapshot := w.Bytes()
 	kv.rf.PersistAndSaveSnapshot(lastCommandIndex, snapshot)
 }
@@ -256,29 +256,31 @@ func (kv *RaftKV) periodCheckApplyMsg() {
 					// then we have a new request, we need to process it
 					// Get request we do not care, handler will do the fetch.
 					// For Put or Append, we do it here.
-					if dup, ok := kv.duplicate[cmd.ClientId]; !ok || dup != cmd.SerialNum {
+					if dup, ok := kv.Duplicate[cmd.ClientId]; !ok || dup != cmd.SerialNum {
 						// save the client id and its serial number
 						switch cmd.Method {
 						//case "Get":
 						//	kv.duplicate[cmd.ClientId] = cmd.SerialNum
 						case "Put":
 							kv.Kvmap[cmd.Key] = cmd.Value
-							kv.duplicate[cmd.ClientId] = cmd.SerialNum
+							kv.Duplicate[cmd.ClientId] = cmd.SerialNum
 						case "Append":
 							kv.Kvmap[cmd.Key] += cmd.Value
-							kv.duplicate[cmd.ClientId] = cmd.SerialNum
+							kv.Duplicate[cmd.ClientId] = cmd.SerialNum
 						}
 					}
+					
+					// Whenever key/value server detects that the Raft state size is approaching this threshold, 
+					// it should save a snapshot, and tell the Raft library that it has snapshotted, 
+					// so that Raft can discard old log entries. 
+					kv.snapshotIfNeeded(m.CommandIndex)
 					
 					// When we have applied message, we found the waiting channel(issued by RPC handler), forward the Ops
 					if c, ok := kv.requestHandlers[m.CommandIndex]; ok {
 						delete(kv.requestHandlers, m.CommandIndex)
 						c <- m
 					}
-					// Whenever key/value server detects that the Raft state size is approaching this threshold, 
-					// it should save a snapshot, and tell the Raft library that it has snapshotted, 
-					// so that Raft can discard old log entries. 
-					kv.snapshotIfNeeded(m.CommandIndex)
+					
 				}
 				kv.UnLock()
 		case <- kv.shutdown:
@@ -325,7 +327,7 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	// You may need initialization code here.
 	kv.applyCh = make(chan raft.ApplyMsg)
 	kv.Kvmap = make(map[string]string)
-	kv.duplicate = make(map[int64]int64)
+	kv.Duplicate = make(map[int64]int64)
 	kv.requestHandlers = make(map[int]chan raft.ApplyMsg)
 	kv.shutdown = make(chan struct{})
 
