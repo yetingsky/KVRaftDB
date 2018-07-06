@@ -690,9 +690,6 @@ func TestSnapshotSize3B(t *testing.T) {
 }
 
 func TestSnapshotRecover3B(t *testing.T) {
-	go func() {
-		log.Println(http.ListenAndServe("localhost:6060", nil))
-	}()
 	// Test: restarts, snapshots, one client (3B) ...
 	GenericTest(t, "3B", 1, false, true, false, 1000)
 }

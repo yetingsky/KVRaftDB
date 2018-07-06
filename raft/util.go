@@ -15,12 +15,27 @@ func DPrintf(format string, a ...interface{}) (n int, err error) {
 	return
 }
 
-const RPCMaxTries = 2
+const RPCMaxTries = 3
 const RPCTimeout = 50 * time.Millisecond
 
 
 func SendRPCRequest(request func() bool) bool {
-	return request()
+	makeRequest := func(successChan chan struct{}) {
+		if ok := request(); ok {
+			successChan <- struct{}{}
+		}
+	}
+
+	for attempts := 0; attempts < 3; attempts++ {
+		rpcChan := make(chan struct{}, 1)
+		go makeRequest(rpcChan)
+		select {
+		case <-rpcChan:
+			return true
+		case <-time.After(RPCTimeout):
+		}
+	}
+	return false
 }
 
 
@@ -33,7 +48,7 @@ func SendSnapshotRPCRequest(request func() bool) bool {
 		}
 	}
 
-	for attempts := 0; attempts < RPCMaxTries; attempts++ {
+	for attempts := 0; attempts < 3; attempts++ {
 		rpcChan := make(chan struct{}, 1)
 		go makeRequest(rpcChan)
 		select {

@@ -14,7 +14,7 @@ type Clerk struct {
 	// You will have to modify this struct.
 	lastLeader int
 	clientId int64
-	serialNum int
+	serialNum int64
 }
 
 func nrand() int64 {
@@ -71,7 +71,7 @@ func (ck *Clerk) Get(key string) string {
 			continue
 		case ok := <-done:
 			if ok && !reply.WrongLeader {
-				ck.serialNum++
+				//ck.serialNum++
 				if reply.Err == OK {
 					return reply.Value
 				}
@@ -112,12 +112,12 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 			done <- ok
 		}()
 		select {
-		case <-time.After(150 * time.Millisecond): // rpc timeout: 200ms
+		case <-time.After(300 * time.Millisecond): // rpc timeout: 200ms
 			ck.lastLeader++
 			continue
 		case ok := <-done:
 			if ok && !reply.WrongLeader && reply.Err == OK {
-				ck.serialNum++
+				ck.serialNum = nrand()
 				return
 			}
 			ck.lastLeader++

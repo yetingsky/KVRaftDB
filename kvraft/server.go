@@ -32,7 +32,7 @@ type Op struct {
 	Key string
 	Value string
 	ClientId int64
-	SerialNum int
+	SerialNum int64
 }
 
 /*
@@ -57,7 +57,7 @@ type RaftKV struct {
 	Kvmap map[string]string
 
 	// duplication detection table
-	duplicate map[int64]int
+	duplicate map[int64]int64
 
 	requestHandlers map[int]chan raft.ApplyMsg
 	shutdown chan struct{}
@@ -71,31 +71,16 @@ func (rf *RaftKV) UnLock() {
 	rf.mu.Unlock()
 }
 
-func (kv *RaftKV) createSnapshot(logIndex int) {
-	w := new(bytes.Buffer)
-	e := labgob.NewEncoder(w)
-
-	kv.snapshotIndex = logIndex
-
-	e.Encode(kv.Kvmap)
-	e.Encode(kv.snapshotIndex)
-	e.Encode(kv.duplicate)
-	data := w.Bytes()
-	kv.rf.PersistAndSaveSnapshot(logIndex, data)
-
-	// Compact raft log til index.
-	//kv.rf.CompactLog(logIndex)
-}
-
 func (kv *RaftKV) loadSnapshot(data []byte) {
 	r := bytes.NewBuffer(data)
 	d := labgob.NewDecoder(r)
 	kvmap := make(map[string]string)
-	duplicate := make(map[int64]int)
+	duplicate := make(map[int64]int64)
 	d.Decode(&kvmap)
 	d.Decode(&kv.snapshotIndex)
 	d.Decode(&duplicate)
 
+	DPrintf("%d load snapshot, snapshotIndex is %d, kvmap size is %d, duplciate map size is %d", kv.me, kv.snapshotIndex, len(kvmap), len(duplicate))
 	kv.Kvmap = kvmap
 	kv.duplicate = duplicate
 }
@@ -133,6 +118,12 @@ func (kv *RaftKV) await(index int, op Op) (success bool) {
 func (kv *RaftKV) Get(args *GetArgs, reply *GetReply) {
 	// Your code here.
 	kv.Lock()
+	if _, isLeader := kv.rf.GetState(); !isLeader {
+		kv.UnLock()
+		reply.WrongLeader = true
+		reply.Err = ""
+		return
+	}
 
 	ops := Op {
 		Method : "Get",
@@ -140,6 +131,18 @@ func (kv *RaftKV) Get(args *GetArgs, reply *GetReply) {
 		ClientId : args.ClientId,
 		SerialNum : args.SerialNum,
 	}
+
+	if dup, ok := kv.duplicate[args.ClientId]; ok {
+		// filter duplicate
+		if args.SerialNum == dup {
+			reply.WrongLeader = false
+			reply.Err = OK
+			reply.Value = kv.Kvmap[args.Key]
+			kv.UnLock()
+			return
+		}
+	}
+
 	kv.UnLock()
 	
 	index, _, isLeader := kv.rf.Start(ops)
@@ -169,6 +172,12 @@ func (kv *RaftKV) Get(args *GetArgs, reply *GetReply) {
 func (kv *RaftKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	// Your code here.
 	kv.Lock()
+	if _, isLeader := kv.rf.GetState(); !isLeader {
+		kv.UnLock()
+		reply.WrongLeader = true
+		reply.Err = ""
+		return
+	}
 
 	ops := Op{
 		Method : args.Op,
@@ -177,6 +186,18 @@ func (kv *RaftKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 		ClientId : args.ClientId,
 		SerialNum : args.SerialNum,
 	}
+
+	// duplicate put/append request
+	if dup, ok := kv.duplicate[args.ClientId]; ok {
+		// filter duplicate
+		if args.SerialNum == dup {
+			kv.UnLock()
+			reply.WrongLeader = false
+			reply.Err = OK
+			return
+		}
+	}
+
 	kv.UnLock()
 
 	index, _, isLeader := kv.rf.Start(ops)
@@ -197,6 +218,11 @@ func (kv *RaftKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 }
 
 func (kv *RaftKV) snapshot(lastCommandIndex int) {
+	if kv.snapshotIndex != lastCommandIndex {
+		DPrintf("%d raftkv server current snapshot index is %d, going to create snapshot for index %d",
+			kv.me, kv.snapshotIndex, lastCommandIndex)
+	}
+	kv.snapshotIndex = lastCommandIndex
 	w := new(bytes.Buffer)
 	e := labgob.NewEncoder(w)
 	e.Encode(kv.Kvmap)
@@ -223,7 +249,7 @@ func (kv *RaftKV) raftStateSizeHitThreshold() bool {
 }
 
 func (kv *RaftKV) snapshotIfNeeded(lastCommandIndex int) {
-	var threshold = int(1.5 * float64(kv.maxraftstate))
+	var threshold = int(0.9 * float64(kv.maxraftstate))
 	if kv.maxraftstate != -1 && kv.rf.GetRaftStateSize() >= threshold {
 		kv.snapshot(lastCommandIndex)
 	}
@@ -249,19 +275,17 @@ func (kv *RaftKV) periodCheckApplyMsg() {
 					// then we have a new request, we need to process it
 					// Get request we do not care, handler will do the fetch.
 					// For Put or Append, we do it here.
-					if dup, ok := kv.duplicate[cmd.ClientId]; !ok || dup < cmd.SerialNum {
+					if dup, ok := kv.duplicate[cmd.ClientId]; !ok || dup != cmd.SerialNum {
 						// save the client id and its serial number
 						switch cmd.Method {
-						case "Get":
-							kv.duplicate[cmd.ClientId] = cmd.SerialNum
+						//case "Get":
+						//	kv.duplicate[cmd.ClientId] = cmd.SerialNum
 						case "Put":
 							kv.Kvmap[cmd.Key] = cmd.Value
 							kv.duplicate[cmd.ClientId] = cmd.SerialNum
 						case "Append":
 							kv.Kvmap[cmd.Key] += cmd.Value
 							kv.duplicate[cmd.ClientId] = cmd.SerialNum
-						default:
-							panic("invalid command operation")
 						}
 					}
 					
@@ -320,7 +344,7 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	// You may need initialization code here.
 	kv.applyCh = make(chan raft.ApplyMsg)
 	kv.Kvmap = make(map[string]string)
-	kv.duplicate = make(map[int64]int)
+	kv.duplicate = make(map[int64]int64)
 	kv.requestHandlers = make(map[int]chan raft.ApplyMsg)
 
 	kv.shutdown = make(chan struct{})
@@ -331,6 +355,7 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
 
+	//go kv.rf.Replay()
 	go kv.periodCheckApplyMsg()
 
 	return kv
