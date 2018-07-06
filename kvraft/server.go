@@ -230,7 +230,7 @@ func (kv *RaftKV) raftStateSizeHitThreshold() bool {
 }*/
 
 func (kv *RaftKV) snapshotIfNeeded(lastCommandIndex int) {
-	var threshold = int(0.9 * float64(kv.maxraftstate))
+	var threshold = int(0.95 * float64(kv.maxraftstate))
 	if kv.maxraftstate != -1 && kv.rf.GetRaftStateSize() >= threshold {
 		kv.snapshot(lastCommandIndex)
 	}
