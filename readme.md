@@ -13,7 +13,7 @@ Raft manages a service's state replicas, and in particular it helps the service 
 - [x] Part A Key/value service without log compaction
 - [x] Part B Key/value service with log compaction
 
-- [ ] Lab 4: Sharded Key/Value Service
+- [x] Lab 4: Sharded Key/Value Service
 - [x] Part A: The Shard Master
 - [] Part B: Sharded Key/Value Server
 
