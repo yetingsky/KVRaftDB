@@ -46,7 +46,7 @@ type Clerk struct {
 
 	//lastLeader int
 	clientId int64
-	serialNum int
+	serialNum int64
 }
 
 //
@@ -92,7 +92,6 @@ func (ck *Clerk) Get(key string) string {
 				var reply GetReply
 				ok := srv.Call("ShardKV.Get", &args, &reply)
 				if ok && reply.WrongLeader == false && (reply.Err == OK || reply.Err == ErrNoKey) {
-					ck.serialNum++
 					return reply.Value
 				}
 				if ok && (reply.Err == ErrWrongGroup) {
@@ -131,7 +130,7 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 				ok := srv.Call("ShardKV.PutAppend", &args, &reply)
 				if ok && reply.WrongLeader == false && reply.Err == OK {
 					//log.Println("Got result from", si)
-					ck.serialNum++
+					ck.serialNum = nrand()
 					return
 				}
 				if ok && reply.Err == ErrWrongGroup {

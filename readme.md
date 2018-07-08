@@ -15,7 +15,7 @@ Raft manages a service's state replicas, and in particular it helps the service 
 
 - [x] Lab 4: Sharded Key/Value Service
 - [x] Part A: The Shard Master
-- [] Part B: Sharded Key/Value Server
+- [x] Part B: Sharded Key/Value Server (Partial Pass)
 
 pprof can check goroutine stacks at runtime
 https://golang.org/pkg/net/http/pprof/

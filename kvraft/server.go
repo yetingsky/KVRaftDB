@@ -159,7 +159,7 @@ func (kv *RaftKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 		return
 	}
 
-	ops := Op{
+	ops := Op {
 		Method : args.Op,
 		Key : args.Key,
 		Value : args.Value,

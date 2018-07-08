@@ -42,13 +42,10 @@ type Op struct {
 
 func (sm *ShardMaster) await(index int, op Op) (success bool) {
 
-	awaitChan, ok := sm.requestHandlers[index]
-	if !ok {
-		awaitChan = make(chan raft.ApplyMsg, 1)
-		sm.requestHandlers[index] = awaitChan
-	} else {
-		return true
-	}
+	sm.Lock()
+	awaitChan := make(chan raft.ApplyMsg, 1)
+	sm.requestHandlers[index] = awaitChan
+	sm.UnLock()
 	
 	for {
 		select {
@@ -326,6 +323,7 @@ func (sm *ShardMaster) periodCheckApplyMsg() {
 		case m, ok := <-sm.applyCh:
 			if ok {				
 				if m.Command != nil {
+					sm.Lock()
 					cmd := m.Command.(Op)
 					if _,isLeader := sm.rf.GetState(); !isLeader {
 						//log.Println(sm.me, "got new config", cmd.Configs)
@@ -337,6 +335,7 @@ func (sm *ShardMaster) periodCheckApplyMsg() {
 						c <- m
 						delete(sm.requestHandlers, m.CommandIndex)
 					}
+					sm.UnLock()
 				}
 			}
 		}

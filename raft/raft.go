@@ -127,6 +127,11 @@ func (rf *Raft) isLeader() bool {
 	return rf.state == Leader
 }
 
+func (rf *Raft) IsLeader() bool {
+	return rf.state == Leader
+}
+
+
 func (rf *Raft) turnToFollow() {
 	rf.state = Follower
 	rf.votedFor = -1

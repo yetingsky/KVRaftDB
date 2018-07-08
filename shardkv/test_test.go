@@ -82,6 +82,7 @@ func TestStaticShards(t *testing.T) {
 	}
 
 	// bring the crashed shard/group back to life.
+	log.Println("!!!!!!!!Start group 1")
 	cfg.StartGroup(1)
 	for i := 0; i < n; i++ {
 		check(t, ck, ka[i], va[i])
@@ -98,6 +99,7 @@ func TestJoinLeave(t *testing.T) {
 
 	ck := cfg.makeClient()
 
+	fmt.Printf("Join Group 1.\n")
 	cfg.join(0)
 
 	n := 10
@@ -112,6 +114,7 @@ func TestJoinLeave(t *testing.T) {
 		check(t, ck, ka[i], va[i])
 	}
 
+	fmt.Printf("Join Group 2.\n")
 	cfg.join(1)
 
 	for i := 0; i < n; i++ {
@@ -121,6 +124,7 @@ func TestJoinLeave(t *testing.T) {
 		va[i] += x
 	}
 
+	fmt.Printf("Leave Group 0.\n")
 	cfg.leave(0)
 
 	for i := 0; i < n; i++ {
@@ -196,10 +200,12 @@ func TestSnapshot(t *testing.T) {
 
 	cfg.checklogs()
 
+	fmt.Printf("Shutdown Group 0 1 2.\n")
 	cfg.ShutdownGroup(0)
 	cfg.ShutdownGroup(1)
 	cfg.ShutdownGroup(2)
 
+	fmt.Printf("Start Group 0 1 2.\n")
 	cfg.StartGroup(0)
 	cfg.StartGroup(1)
 	cfg.StartGroup(2)
