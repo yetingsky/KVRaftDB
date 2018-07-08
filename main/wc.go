@@ -1,9 +1,12 @@
 package main
 
 import (
+	"strings"
 	"fmt"
-	"mapreduce"
+	"kvdb/mapreduce"
 	"os"
+	"strconv"
+	"unicode"
 )
 
 //
@@ -14,7 +17,26 @@ import (
 // of key/value pairs.
 //
 func mapF(filename string, contents string) []mapreduce.KeyValue {
-	// Your code here (Part II).
+	
+	localMap := make(map[string]int)
+	// split file content to words
+	f := func(c rune) bool {
+		return !unicode.IsLetter(c) && !unicode.IsNumber(c)
+	}
+	words := strings.FieldsFunc(contents, f)
+
+	for _, v := range words {
+		localMap[v]++;
+	}
+
+	result := make([]mapreduce.KeyValue, len(localMap))
+	for k, v := range localMap {
+		var kv mapreduce.KeyValue
+		kv.Value = strconv.Itoa(v)
+		kv.Key = k
+		result = append(result, kv)
+	}
+	return result;
 }
 
 //
@@ -23,7 +45,19 @@ func mapF(filename string, contents string) []mapreduce.KeyValue {
 // any map task.
 //
 func reduceF(key string, values []string) string {
-	// Your code here (Part II).
+	sum := 0
+	for _, v := range values {
+		if v == "" {
+			continue
+		}
+		i, err := strconv.Atoi(v)
+		if err != nil {
+			fmt.Println("reduceF convert error, what is here: ", v)
+			break;
+		}
+		sum += i
+	}
+	return strconv.Itoa(sum)
 }
 
 // Can be run in 3 ways:
@@ -42,6 +76,6 @@ func main() {
 		}
 		mr.Wait()
 	} else {
-		mapreduce.RunWorker(os.Args[2], os.Args[3], mapF, reduceF, 100, nil)
+		mapreduce.RunWorker(os.Args[2], os.Args[3], mapF, reduceF, 100)
 	}
 }
