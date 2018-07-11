@@ -11,6 +11,7 @@ import (
 	"bytes"
 	"log"
 )
+const ShardMasterCheckInterval = 50 * time.Millisecond
 
 const Debug = 0
 
@@ -195,7 +196,10 @@ func (kv *ShardKV) await(index int, term int, op Op) (success bool) {
 
 func (kv *ShardKV) checkIfOwnsKey(key string) bool {
 	// check if I owns the shard of the key
-	//log.Println(kv.me, "Current shards map", kv.ShardStatusList)
+	if Debug == 1{
+		log.Println(kv.me, "Current shards map", kv.ShardStatusList)
+	}
+	
 	shardNum := key2shard(key)
 	if status := kv.ShardStatusList[shardNum]; status != AVAILABLE {
 		DPrintf("%d DOES NOT OWN shard %d for key %s. Our gid is %d, status is %s", 
@@ -246,7 +250,9 @@ func (kv *ShardKV) Get(args *GetArgs, reply *GetReply) {
 			kv.Lock()
 			reply.WrongLeader = false			
 
-			//log.Println(kv.me, "my group", kv.gid, "Get: my current kvmap", kv.Kvmap, "ops is", ops)
+			if Debug == 1 {
+				log.Println(kv.me, "my group", kv.gid, "Get: my current kvmap", kv.Kvmap, "ops is", ops)
+			}
 			if val, ok := kv.Kvmap[args.Key]; ok {
 				reply.Value = val
 				reply.Err = OK
@@ -301,7 +307,9 @@ func (kv *ShardKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 		reply.WrongLeader = true
 	} else {
 		success := kv.await(index, term, ops)
-		//log.Println(kv.me, "my group", kv.gid, "Put: my current kvmap", kv.Kvmap, "ops is", ops)
+		if Debug == 1{
+			log.Println(kv.me, "my group", kv.gid, "Put: my current kvmap", kv.Kvmap, "ops is", ops)
+		}
 		if !success {
 			reply.WrongLeader = true
 		} else {
@@ -327,8 +335,7 @@ func (kv *ShardKV) periodCheckApplyMsg() {
 				}
 
 				cmd := m.Command.(Op)
-				if m.CommandValid {					
-
+				if m.CommandValid {		
 					// if we never process this client, or we never process this operation serial number
 					// then we have a new request, we need to process it
 					// Get request we do not care, handler will do the fetch.
@@ -344,24 +351,54 @@ func (kv *ShardKV) periodCheckApplyMsg() {
 							kv.Duplicate[cmd.ClientId] = cmd.SerialNum
 						case "ExportComplete":
 							{
+								// remove kvmap, duplicate map, change ownership
 								if kv.ShardStatusList[cmd.ShardNumber] == EXPORTING {
-									DPrintf("%d export shard %d completed.", kv.me, cmd.ShardNumber)
+									DPrintf("%d export shard %d completed.", kv.me, cmd.ShardNumber)									
+									for k := range cmd.Kvmap {
+										if cmd.ShardNumber == key2shard(k) {
+											delete(kv.Kvmap, k)
+										}
+									}
 									kv.ShardStatusList[cmd.ShardNumber] = NOTOWNED
 								} else {
 									DPrintf("%d err when receiving ExportComplete, Expected prev state: EXPORTING. but is %s", kv.me, kv.shardStatusToString(kv.ShardStatusList[cmd.ShardNumber]))
 								}								
 							}
 						case "ImportComplete":
-							{
+							{								
+								// insert kvmap, duplicate map, change shard ownership to ourselves
 								if kv.ShardStatusList[cmd.ShardNumber] == IMPORTING {
 									DPrintf("%d import shard %d completed.", kv.me, cmd.ShardNumber)
-									kv.ShardStatusList[cmd.ShardNumber] = AVAILABLE
+									
+									for k,v := range cmd.Kvmap {
+										if cmd.ShardNumber == key2shard(k) {
+											kv.Kvmap[k] = v
+										}
+									}
+									// add the duplicate map
+									for k,v := range cmd.Duplicate {
+										kv.Duplicate[k] = v
+									}
+
+									kv.ShardStatusList[cmd.ShardNumber] = AVAILABLE									
 								} else {
-									DPrintf("%d err when receiving ImportComplete, Expected prev state: IMPORTING. but is %s", kv.me, kv.shardStatusToString(kv.ShardStatusList[cmd.ShardNumber]))
+									DPrintf("%d err when receiving ImportComplete, config version %d, Expected prev state: IMPORTING. but is %s", kv.me, kv.LatestCfg.Num, kv.shardStatusToString(kv.ShardStatusList[cmd.ShardNumber]))
+
+									// hack
+									for k,v := range cmd.Kvmap {
+										if cmd.ShardNumber == key2shard(k) {
+											kv.Kvmap[k] = v
+										}
+									}
+									kv.ShardStatusList[cmd.ShardNumber] = AVAILABLE
 								}
 							}
-						}
-					//}
+						case "ApplyConfig":
+							{
+								kv.applyConfigOperation(cmd.BroadcastCfgVersion)
+							}
+						}					
+					}
 					
 					// Whenever key/value server detects that the Raft state size is approaching this threshold, 
 					// it should save a snapshot, and tell the Raft library that it has snapshotted, 
@@ -375,7 +412,6 @@ func (kv *ShardKV) periodCheckApplyMsg() {
 					}
 				}
 				kv.UnLock()
-			}
 		case <- kv.shutdown:
 			return	
 		}
@@ -390,99 +426,224 @@ func (kv *ShardKV) periodCheckApplyMsg() {
 // turn off debug output from this instance.
 //
 func (kv *ShardKV) Kill() {
-	kv.Lock()
-	kv.UnLock()
+	//kv.Lock()
+	//defer kv.UnLock()
 
 	kv.rf.Kill()
 	kv.isDecommissioned = true
 	close(kv.shutdown)
 }
 
+/*
+func (kv *ShardKV) applyConfigOperation(num int) {
+	shardTransferInProgress := func() bool {
+		for _, status := range kv.ShardStatusList {
+			if status == EXPORTING || status == IMPORTING {
+				return true
+			}
+		}
+		return false
+	}()
+
+	if num == 1 {
+		cfg := kv.mck.Query(num)
+		newShardsToGroupMap := cfg.Shards
+		// very fist valid config created in response to 1st Join RPC
+		for shardIndex, newGid := range newShardsToGroupMap {
+			if newGid == kv.gid {
+				kv.ShardStatusList[shardIndex] = AVAILABLE
+			} else {
+				kv.ShardStatusList[shardIndex] = NOTOWNED
+			}
+		}
+		kv.LatestCfg = cfg
+		return
+	}	
+
+	// We want to apply configurations in-order and when previous transfers are done
+	if num == kv.LatestCfg.Num+1 && !shardTransferInProgress {
+		cfg := kv.mck.Query(num)
+		kv.LatestCfg = cfg
+		for shard, gid := range cfg.Shards {
+			shardStatus := kv.ShardStatusList[shard]
+			if gid == kv.gid && shardStatus == NOTOWNED {
+				DPrintf("%d gid %d, Configuration change: Now owner of shard %d. Change to Importing, Cfg number is %d", kv.me, kv.gid, shard, num)
+				kv.ShardStatusList[shard] = IMPORTING
+				
+				// Query previous configurations until we find either there was a previous owner, or that we're the first owner
+				lastConfig := cfg
+				for lastConfig.Num > 1 && lastConfig.Shards[shard] == kv.gid {
+					DPrintf("server %d, prev config number %d, preve config shard %d owner %d, we are group %d",
+						kv.me, lastConfig.Num, shard, lastConfig.Shards[shard], kv.gid)
+					lastConfig = kv.mck.Query(lastConfig.Num - 1)
+				}
+
+				DPrintf("server %d, after loop config number %d, preve config shard %d owner %d, we are group %d",
+					kv.me, lastConfig.Num, shard, lastConfig.Shards[shard], kv.gid)
+				if lastConfig.Num == 1 && lastConfig.Shards[shard] == kv.gid { // If this is the first config, and we're the owner
+					//kvInfo("Creating new shard: %d", kv, shardNum)
+					DPrintf("%d Creating new shard: %d", kv.me, shard)
+					kv.ShardStatusList[shard] = AVAILABLE
+				}
+			} else if gid != kv.gid && shardStatus == AVAILABLE {
+				kv.ShardStatusList[shard] = EXPORTING
+				if kv.rf.IsLeader() {
+					goneShard, destGid, cachedCfgNum := shard, gid, cfg.Num
+					DPrintf("In Config num %d, server %d (our GID %d) sends shard %d to new GID %d", cachedCfgNum, kv.me, 
+						kv.gid, goneShard, destGid)
+
+					destServers := make([]string, 0)
+					for _,server := range cfg.Groups[destGid] {
+						destServers = append(destServers, server)
+					}
+					kv.UnLock()
+					kv.sendMigrateShard(goneShard, destGid, cachedCfgNum, destServers)
+					kv.Lock()
+				}
+			} else if gid != kv.gid && shardStatus == IMPORTING {
+				// We used to own the shard, and waiting for importing. But the new owner now is not us! Switch back to NOT_OWNED.
+				DPrintf("%d (our GID %d) waiting on importing shard %d, but that shard NEVER transferred to us, new owner group %d",
+					kv.me, kv.gid, shard, gid)
+				kv.ShardStatusList[shard] = NOTOWNED
+			}
+		}
+	}
+}*/
+
+
+func (kv *ShardKV) applyConfigOperation(num int) {
+	shardTransferInProgress := func() bool {
+		for _, status := range kv.ShardStatusList {
+			if status == EXPORTING || status == IMPORTING {
+				return true
+			}
+		}
+		return false
+	}()
+
+	if kv.LatestCfg.Num + 1 != num || shardTransferInProgress {
+		return
+	}
+
+	cfg := kv.mck.Query(num)
+	newShardsToGroupMap := cfg.Shards
+	if cfg.Num > 1 {
+		cachedPrevShardsToGroupMap := kv.LatestCfg.Shards
+		// Update shards ownership
+		for shardIndex, newGid := range newShardsToGroupMap {
+			cachedGid := cachedPrevShardsToGroupMap[shardIndex]
+			// if we owned, but lose, change to Exporting state
+			shardStatus := kv.ShardStatusList[shardIndex]
+			if cachedGid == kv.gid && newGid != kv.gid {
+				if shardStatus == AVAILABLE {
+					kv.ShardStatusList[shardIndex] = EXPORTING
+					// Only leader sends migrate shard RPC, followers are waiting for confirmation once done
+					if kv.rf.IsLeader() {
+						goneShard, destGid, cachedCfgNum := shardIndex, newGid, cfg.Num
+						DPrintf("In Config num%d, server %d (our GID %d) sends shard %d to new GID %d", cachedCfgNum, kv.me, 
+							kv.gid, goneShard, destGid)
+
+						destServers := make([]string, 0)
+						for _,server := range cfg.Groups[destGid] {
+							destServers = append(destServers, server)
+						}
+						kv.UnLock()
+						kv.sendMigrateShard(goneShard, destGid, cachedCfgNum, destServers)
+						kv.Lock()
+					}
+				} else {
+					DPrintf("%d (our GID %d) lost shard %d we owned, new gid %d, but our shard status is %s. Expected state 'AVAILABLE'",
+						kv.me, kv.gid, shardIndex, newGid, kv.shardStatusToString(shardStatus))
+					kv.ShardStatusList[shardIndex] = NOTOWNED //hack
+				}				
+			} else if cachedGid != kv.gid && newGid == kv.gid {
+				// if we gain new one, previous not owned, change to Importing state
+				if shardStatus == NOTOWNED {
+					DPrintf("%d (our GID %d) gain new shard %d from old gid %d, prev state 'NOTOWNED'",
+						kv.me, kv.gid, shardIndex, cachedGid)
+					if cachedGid != 0 {
+						kv.ShardStatusList[shardIndex] = IMPORTING
+					} else {
+						kv.ShardStatusList[shardIndex] = AVAILABLE //hack
+					}				
+
+					// Query previous configurations until we find either there was a previous owner, or that we're the first owner
+					lastConfig := cfg
+					for lastConfig.Num > 1 && lastConfig.Shards[shardIndex] == kv.gid {
+						DPrintf("server %d, prev config number %d, preve config shard %d owner %d, we are group %d",
+							kv.me, lastConfig.Num, shardIndex, lastConfig.Shards[shardIndex], kv.gid)
+						lastConfig = kv.mck.Query(lastConfig.Num - 1)
+					}
+
+					DPrintf("server %d, after loop config number %d, preve config shard %d owner %d, we are group %d",
+						kv.me, lastConfig.Num, shardIndex, lastConfig.Shards[shardIndex], kv.gid)
+					if lastConfig.Num == 1 && lastConfig.Shards[shardIndex] == kv.gid { // If this is the first config, and we're the owner
+						//kvInfo("Creating new shard: %d", kv, shardNum)
+						DPrintf("%d Creating new shard: %d", kv.me, shardIndex)
+						kv.ShardStatusList[shardIndex] = AVAILABLE
+					}
+				} else if newGid != kv.gid && shardStatus == IMPORTING {
+					// We used to own the shard, and waiting for importing. But the new owner now is not us! Switch back to NOT_OWNED.
+					DPrintf("%d (our GID %d) waiting on importing shard %d, but that shard NEVER transferred to us, new owner group %d",
+						kv.me, kv.gid, shardIndex, newGid)
+					kv.ShardStatusList[shardIndex] = NOTOWNED
+				}				
+			}
+		}
+	} else if cfg.Num == 1 {
+		// very fist valid config created in response to 1st Join RPC
+		for shardIndex, newGid := range newShardsToGroupMap {
+			if newGid == kv.gid {
+				kv.ShardStatusList[shardIndex] = AVAILABLE
+			} else {
+				kv.ShardStatusList[shardIndex] = NOTOWNED
+			}
+		}
+	}
+	kv.LatestCfg = cfg
+}
+
 func (kv *ShardKV) periodCheckShardMasterConfig() {
 
 	for {
-		if kv.isDecommissioned {
-			return
-		}
-
-		cfg := kv.mck.Query(-1)
-
-		kv.Lock()
-
-		// no config changes, skipped
-		if kv.LatestCfg.Num >= cfg.Num {
-			kv.UnLock()
-			time.Sleep(100 * time.Millisecond)
-			continue
-		}
-
-		newShardsToGroupMap := cfg.Shards
-		if cfg.Num > 1 {
-			cachedPrevShardsToGroupMap := kv.LatestCfg.Shards
-			// Update shards ownership
-			for shardIndex, newGid := range newShardsToGroupMap {
-				cachedGid := cachedPrevShardsToGroupMap[shardIndex]
-				// if we owned, but lose, change to Exporting state
-				shardStatus := kv.ShardStatusList[shardIndex]
-				if cachedGid == kv.gid && newGid != kv.gid {
-					if shardStatus == AVAILABLE {
-						kv.ShardStatusList[shardIndex] = EXPORTING
-						// Only leader sends migrate shard RPC, followers are waiting for confirmation once done
-						if kv.rf.IsLeader() {
-							goneShard, destGid, cachedCfgNum := shardIndex, newGid, cfg.Num
-							DPrintf("In Config num%d, server %d (our GID %d) sends shard %d to new GID %d", cachedCfgNum, kv.me, 
-								kv.gid, goneShard, destGid)
-
-							destServers := make([]string, 0)
-							for _,server := range cfg.Groups[destGid] {
-								destServers = append(destServers, server)
-							}
-							kv.UnLock()
-							go kv.sendMigrateShard(goneShard, destGid, cachedCfgNum, destServers)
-							kv.Lock()
-						}
-					} else {
-						DPrintf("%d (our GID %d) lost shard %d we owned, new gid %d, but our shard status is %s. Expected state 'AVAILABLE'",
-							kv.me, kv.gid, shardIndex, newGid, kv.shardStatusToString(shardStatus))
-						kv.ShardStatusList[shardIndex] = NOTOWNED //hack
-					}				
-				} else if cachedGid != kv.gid && newGid == kv.gid {
-					// if we gain new one, previous not owned, change to Importing state
-					if shardStatus == NOTOWNED {
-						DPrintf("%d (our GID %d) gain new shard %d from old gid %d, prev state 'NOTOWNED'",
-							kv.me, kv.gid, shardIndex, cachedGid)
-						if cachedGid != 0 {
-							kv.ShardStatusList[shardIndex] = IMPORTING
-						} else {
-							kv.ShardStatusList[shardIndex] = AVAILABLE //hack
-						}						
-					} else if newGid != kv.gid && shardStatus == IMPORTING {
-						// We used to own the shard, and waiting for importing. But the new owner now is not us! Switch back to NOT_OWNED.
-						DPrintf("%d (our GID %d) waiting on importing shard %d, but that shard NEVER transferred to us, new owner group %d",
-							kv.me, kv.gid, shardIndex, newGid)
-						kv.ShardStatusList[shardIndex] = NOTOWNED
-					}				
-				} else {
-					// logging
-				}	
+		select {
+		case <-time.After(ShardMasterCheckInterval):
+			kv.Lock()
+			if kv.isDecommissioned {
+				kv.UnLock()
+				return
 			}
-		} else if cfg.Num == 1 {
-			// very fist valid config created in response to 1st Join RPC
-			for shardIndex, newGid := range newShardsToGroupMap {
-				if newGid == kv.gid {
-					kv.ShardStatusList[shardIndex] = AVAILABLE
+
+			// only leader fetch config and broadcast
+			if !kv.rf.IsLeader() {
+				kv.UnLock()
+				continue
+			}
+
+			latestCfg := kv.mck.Query(-1)
+			curCfgNum := kv.LatestCfg.Num + 1
+			for ; curCfgNum <= latestCfg.Num; curCfgNum++ {
+				var applyCfg shardmaster.Config
+				if curCfgNum == latestCfg.Num {
+					applyCfg = latestCfg
 				} else {
-					kv.ShardStatusList[shardIndex] = NOTOWNED
+					applyCfg = kv.mck.Query(curCfgNum)
+				}
+
+				ops := Op {
+					Method : "ApplyConfig",
+					BroadcastCfgVersion : applyCfg.Num,
+				}
+				_,_,isleader := kv.rf.Start(ops)
+				if !isleader {
+					DPrintf("%d no long leader, should not apply")
+					break
 				}
 			}
+					
+			kv.UnLock()
 		}
-		
-		kv.LatestCfg = cfg
-		
-		kv.UnLock()
-
-		time.Sleep(100 * time.Millisecond)
-	}
+	}	
 }
 
 
@@ -541,9 +702,6 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister,
 	kv.shutdown = make(chan struct{})
 
 	kv.requestHandlers = make(map[int]chan raft.ApplyMsg)
-	/*for i := range kv.ShardStatusList {
-		kv.ShardStatusList[i] = NOTOWNED // set initial shard state to not owned by us
-	}*/
 
 	if data := persister.ReadSnapshot(); kv.snapshotsEnabled && data != nil && len(data) > 0 {
 		kv.loadSnapshot(data)
@@ -558,6 +716,20 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister,
 	return kv
 }
 
+func (kv *ShardKV) startRequest(op Op, reply *RequestReply) {
+	kv.Lock()
+	index, term, isLeader := kv.rf.Start(op)
+	kv.UnLock()
+
+	if !isLeader {
+		reply.WrongLeader = true
+	} else {
+		if success := kv.await(index, term, op); !success { // Request likely failed due to leadership change
+			reply.WrongLeader = true
+		}
+	}
+}
+
 func (kv *ShardKV) MigrateShard(args *MigrateShardArgs, reply *MigrateShardReply) {
 	kv.Lock()
 
@@ -567,31 +739,47 @@ func (kv *ShardKV) MigrateShard(args *MigrateShardArgs, reply *MigrateShardReply
 		return
 	}
 
-	DPrintf("MigrateShard Resp: In Config num %d, server %d (GID %d) got shard %d from another group", args.ConfigVersion, kv.me, kv.gid,
-		args.ShardNumber)
+	//if kv.LatestCfg.Num >= args.ConfigVersion {
 
-	reply.Err = OK
-
-	// if already handled, return
-	if kv.ShardStatusList[args.ShardNumber] == AVAILABLE {
-		kv.UnLock()
-		return // dupliate request
-	}
-
-	// save kvmap, duplicate map, but do not change shard ownership to ourselves
-	// bla bla bla
-	for k,v := range args.Kvmap {
-		if args.ShardNumber == key2shard(k) {
-			kv.Kvmap[k] = v
+		// if already handled, return
+		if kv.ShardStatusList[args.ShardNumber] == AVAILABLE {
+			kv.UnLock()
+			return // dupliate request
 		}
-	}
 
-	kv.UnLock()
-	// start ops command to let followers know we are ready to take in new requests
-	kv.broadcastMigrationStatus("ImportComplete", args.ShardNumber, args.ConfigVersion)
+		DPrintf("MigrateShard Resp: In Config num %d, server %d (GID %d) got shard %d from another group", args.ConfigVersion, kv.me, kv.gid,
+		args.ShardNumber)
+		
+
+		// Copy shard data
+		data := make(map[string]string)
+		for k := range args.Kvmap {
+			if args.ShardNumber == key2shard(k) {
+				data[k] = args.Kvmap[k]
+			}
+		}
+		if Debug == 1 {
+			log.Println(kv.me, "got kvmap", data)
+		}
+
+		// Copy shard's latest requests
+		duplicateReqs := make(map[int64]int64)
+		for k := range args.Duplicate {
+			duplicateReqs[k] = args.Duplicate[k]
+		}
+
+		kv.UnLock()
+		// start ops command to let followers know we are ready to take in new requests
+		kv.broadcastMigrationStatus("ImportComplete", args.ShardNumber, args.ConfigVersion, data, duplicateReqs)	
+		reply.Err = OK
+	//} else if args.ConfigVersion < kv.LatestCfg.Num {
+	//	kv.UnLock()
+	//	reply.Err = OK
+	//}
 }
 
-func (kv *ShardKV) broadcastMigrationStatus(status string, shard int, cfgNum int) bool {
+func (kv *ShardKV) broadcastMigrationStatus(status string, shard int, cfgNum int, 
+		kvmap map[string]string, duplicates map[int64]int64) bool {
 	kv.Lock()
 	defer kv.UnLock()
 
@@ -599,6 +787,8 @@ func (kv *ShardKV) broadcastMigrationStatus(status string, shard int, cfgNum int
 		Method : status,
 		ShardNumber : shard,
 		BroadcastCfgVersion : cfgNum,
+		Kvmap : kvmap,
+		Duplicate : duplicates,
 	}
 
 	_,_, isLeader := kv.rf.Start(ops)
@@ -624,7 +814,7 @@ func (kv *ShardKV) sendMigrateShard(shard int, destGid int, cfgNum int, servers 
 
 	kv.UnLock()
 
-	//DPrintf("%d sends shard %d to GID %d server", kv.me, shard, destGid)
+	DPrintf("%d sends shard %d to GID %d server", kv.me, shard, destGid)
 
 	// for each server in gid, call it until found a leader and success
 	for {
@@ -637,7 +827,7 @@ func (kv *ShardKV) sendMigrateShard(shard int, destGid int, cfgNum int, servers 
 					kv.me, shard, destGid)
 	
 				// Broadcast to all replica of my group that the migration for shard X is completed.
-				kv.broadcastMigrationStatus("ExportComplete", shard, cfgNum)
+				kv.broadcastMigrationStatus("ExportComplete", shard, cfgNum, req.Kvmap, req.Duplicate)
 				return
 			}
 			if ok && reply.Err == ErrWrongGroup {

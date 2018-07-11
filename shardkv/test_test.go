@@ -25,7 +25,7 @@ func check(t *testing.T, ck *Clerk, key string, value string) {
 //
 // test static 2-way sharding, without shard movement.
 //
-func TestStaticShards(t *testing.T) {
+func TestHahaStaticShards(t *testing.T) {
 	fmt.Printf("Test: static shards ...\n")
 
 	cfg := make_config(t, 3, false, -1)
@@ -91,7 +91,7 @@ func TestStaticShards(t *testing.T) {
 	fmt.Printf("  ... Passed\n")
 }
 
-func TestJoinLeave(t *testing.T) {
+func TestHahaJoinLeave(t *testing.T) {
 	fmt.Printf("Test: join then leave ...\n")
 
 	cfg := make_config(t, 3, false, -1)
@@ -147,7 +147,7 @@ func TestJoinLeave(t *testing.T) {
 	fmt.Printf("  ... Passed\n")
 }
 
-func TestSnapshot(t *testing.T) {
+func TestHahaSnapshot(t *testing.T) {
 	fmt.Printf("Test: snapshots, join, and leave ...\n")
 
 	cfg := make_config(t, 3, false, 1000)
@@ -814,7 +814,7 @@ func TestChallenge1Concurrent(t *testing.T) {
 // shards that are not affected by a config change
 // while the config change is underway
 //
-func TestChallenge2Unaffected(t *testing.T) {
+func TestHahaChallenge2Unaffected(t *testing.T) {
 	fmt.Printf("Test: unaffected shard access (challenge 2) ...\n")
 
 	cfg := make_config(t, 3, true, 100)
@@ -884,7 +884,7 @@ func TestChallenge2Unaffected(t *testing.T) {
 // have been received as a part of a config migration when the entire migration
 // has not yet completed.
 //
-func TestChallenge2Partial(t *testing.T) {
+func TestHahaChallenge2Partial(t *testing.T) {
 	fmt.Printf("Test: partial migration shard access (challenge 2) ...\n")
 
 	cfg := make_config(t, 3, true, 100)

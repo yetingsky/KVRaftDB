@@ -59,3 +59,8 @@ type MigrateShardReply struct {
 	WrongLeader bool
 	Err         Err
 }
+
+type RequestReply struct {
+	WrongLeader bool
+	Err         Err
+}
