@@ -34,3 +34,16 @@ Lab3 B modify Raft and kvserver to cooperate to save space: from time to time kv
 * In each raft server local apply logic, if last applied index is less than snapshot, it needs to apply the snapshot it has, include the saved data to applyMsg, so the kvRaft app can get it
 * when kvraft app gets it, load the data, save as keyValue Map, client request by uuid map
 One iteration completed.
+
+### Status
+Raft system completed with minor issues:
+Lab1, Lab2, Lab3, Lab4A 100% passed.
+Lab4B passed first half of tests, and challenge 2.
+Concurrent and reliable tests failed.
+In lab4B, all necessary logic has been implemented, however the following needs more work:
+1. shardMaster should apply config to all followers then rebalance.
+2. Fix reliable issue by handling duplicate requests. Logic is done, need more debugging.
+3. Import/export logic needs to clean up, should handle config one by one correctly. Current impl has some hacking code.
+Overrall, the great lab is completed.
+
+### Thank you, MIT.
