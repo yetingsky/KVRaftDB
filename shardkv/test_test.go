@@ -217,7 +217,7 @@ func TestHahaSnapshot(t *testing.T) {
 	fmt.Printf("  ... Passed\n")
 }
 
-func TestMissChange(t *testing.T) {
+func TestHahaMissChange(t *testing.T) {
 	fmt.Printf("Test: servers miss configuration changes...\n")
 
 	cfg := make_config(t, 3, false, 1000)
@@ -306,7 +306,7 @@ func TestMissChange(t *testing.T) {
 func TestConcurrent1(t *testing.T) {
 	fmt.Printf("Test: concurrent puts and configuration changes...\n")
 
-	cfg := make_config(t, 3, false, 100)
+	cfg := make_config(t, 3, false, 10000)
 	defer cfg.cleanup()
 
 	ck := cfg.makeClient()
@@ -458,7 +458,7 @@ func TestConcurrent2(t *testing.T) {
 func TestUnreliable1(t *testing.T) {
 	fmt.Printf("Test: unreliable 1...\n")
 
-	cfg := make_config(t, 3, true, 100)
+	cfg := make_config(t, 3, true, 10000)
 	defer cfg.cleanup()
 
 	ck := cfg.makeClient()

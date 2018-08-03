@@ -22,6 +22,7 @@ type ShardMaster struct {
 	configs []Config // indexed by config num
 
 	requestHandlers map[int]chan raft.ApplyMsg
+	latestRequests  map[int64]int64 // Client ID -> Last applied Request ID
 }
 
 func (sm *ShardMaster) Lock() {
@@ -38,6 +39,15 @@ type Op struct {
 
 	// TODO: 
 	Configs []Config
+}
+
+// De-duplicating requests, for "exactly-once" semantics
+// Note: Each RPC implies that the client has seen the reply for its previous RPC. It's OK to assume that
+// a client will make only one call into a clerk at a time.
+func (sm *ShardMaster) isRequestDuplicate(clientId int64, requestId int64) bool {
+	lastRequest, isPresent := sm.latestRequests[clientId]
+	sm.latestRequests[clientId] = requestId
+	return isPresent && lastRequest == requestId
 }
 
 func (sm *ShardMaster) await(index int, op Op) (success bool) {
@@ -104,6 +114,12 @@ func (sm *ShardMaster) rebalance(groups map[int][]string) {
 func (sm *ShardMaster) Join(args *JoinArgs, reply *JoinReply) {
 	// Your code here.
 	sm.Lock()
+
+	/*if sm.isRequestDuplicate(args.ClientId, args.RequestId) {
+		sm.UnLock()
+		return
+	}*/
+
 	//log.Println("Join new groups", args.Servers)
 	if _, isLeader := sm.rf.GetState(); !isLeader {
 		reply.WrongLeader = true
@@ -156,6 +172,11 @@ func (sm *ShardMaster) Leave(args *LeaveArgs, reply *LeaveReply) {
 	//log.Println("Leave group ids", args.GIDs)
 
 	sm.Lock()
+	/*if sm.isRequestDuplicate(args.ClientId, args.RequestId) {
+		sm.UnLock()
+		return
+	}*/
+
 	if _, isLeader := sm.rf.GetState(); !isLeader {
 		reply.WrongLeader = true
 		sm.UnLock()
@@ -212,8 +233,12 @@ func (sm *ShardMaster) Leave(args *LeaveArgs, reply *LeaveReply) {
 func (sm *ShardMaster) Move(args *MoveArgs, reply *MoveReply) {
 	// Your code here.
 	//log.Println("Move args:", args)
-
 	sm.Lock()
+	/*if sm.isRequestDuplicate(args.ClientId, args.RequestId) {
+		sm.UnLock()
+		return
+	}*/
+
 	if _, isLeader := sm.rf.GetState(); !isLeader {
 		reply.WrongLeader = true
 		sm.UnLock()
@@ -256,7 +281,7 @@ func (sm *ShardMaster) Move(args *MoveArgs, reply *MoveReply) {
 func (sm *ShardMaster) Query(args *QueryArgs, reply *QueryReply) {
 	// Your code here.
 	sm.Lock()
-	if _, isLeader := sm.rf.GetState(); !isLeader {
+	if !sm.rf.IsLeader() {
 		reply.WrongLeader = true
 		sm.UnLock()
 		return
@@ -363,6 +388,7 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister)
 	sm.rf = raft.Make(servers, me, persister, sm.applyCh)
 
 	sm.requestHandlers = make(map[int]chan raft.ApplyMsg)
+	sm.latestRequests = make(map[int64]int64)
 
 	go sm.periodCheckApplyMsg()
 

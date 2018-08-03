@@ -13,7 +13,7 @@ import (
 )
 const ShardMasterCheckInterval = 50 * time.Millisecond
 
-const Debug = 0
+const Debug = 1
 
 func DPrintf(format string, a ...interface{}) (n int, err error) {
 	if Debug > 0 {
@@ -66,7 +66,7 @@ type Op struct {
 
 	// used for migrate shards, followers need to catch up the latest changes
 	Kvmap map[string]string
-	Duplicate map[int64]int64
+	LatestRequests map[int64]int64
 
 	// used for import and export
 	ShardNumber int
@@ -95,7 +95,8 @@ type ShardKV struct {
 	Kvmap map[string]string
 
 	// duplication detection table
-	Duplicate map[int64]int64
+	//Duplicate map[int64]int64
+	latestRequests map[int]map[int64]int64   // Shard ID (int) -> Last request key-values (Client ID -> Request ID)
 
 	requestHandlers map[int]chan raft.ApplyMsg
 
@@ -117,16 +118,13 @@ func (kv *ShardKV) UnLock() {
 }
 
 func (kv *ShardKV) snapshot(lastCommandIndex int) {
-	if kv.SnapshotIndex != lastCommandIndex {
-		DPrintf("%d ShardKV server current snapshot index is %d, going to create snapshot for index %d",
-			kv.me, kv.SnapshotIndex, lastCommandIndex)
-	}
+	
 	kv.SnapshotIndex = lastCommandIndex
 	w := new(bytes.Buffer)
 	e := labgob.NewEncoder(w)
 	e.Encode(kv.Kvmap)
 	e.Encode(kv.SnapshotIndex)
-	e.Encode(kv.Duplicate)
+	e.Encode(kv.latestRequests)
 	e.Encode(kv.ShardStatusList)
 	e.Encode(kv.LatestCfg)
 	snapshot := w.Bytes()
@@ -136,6 +134,10 @@ func (kv *ShardKV) snapshot(lastCommandIndex int) {
 func (kv *ShardKV) snapshotIfNeeded(lastCommandIndex int) {
 	var threshold = int(0.95 * float64(kv.maxraftstate))
 	if kv.maxraftstate != -1 && kv.rf.GetRaftStateSize() >= threshold {
+		if kv.SnapshotIndex != lastCommandIndex {
+			DPrintf("%d ShardKV server gid(%d) current snapshot index is %d, going to create snapshot for index %d. Current raft size is %d, threhold is %d",
+				kv.me, kv.gid, kv.SnapshotIndex, lastCommandIndex, kv.rf.GetRaftStateSize(), threshold)
+		}
 		kv.snapshot(lastCommandIndex)
 	}
 }
@@ -144,7 +146,7 @@ func (kv *ShardKV) loadSnapshot(data []byte) {
 	r := bytes.NewBuffer(data)
 	d := labgob.NewDecoder(r)
 	kvmap := make(map[string]string)
-	duplicate := make(map[int64]int64)
+	duplicate := make(map[int]map[int64]int64)
 	d.Decode(&kvmap)
 	d.Decode(&kv.SnapshotIndex)
 	d.Decode(&duplicate)
@@ -152,7 +154,7 @@ func (kv *ShardKV) loadSnapshot(data []byte) {
 	d.Decode(&kv.LatestCfg)
 	//DPrintf("%d load snapshot, snapshotIndex is %d, kvmap size is %d, duplciate map size is %d", kv.me, kv.SnapshotIndex, len(kvmap), len(duplicate))
 	kv.Kvmap = kvmap
-	kv.Duplicate = duplicate
+	kv.latestRequests = duplicate
 }
 
 // 我之前的做法是一个for loop 睡interval再继续， 每次loop all cached log看来的Index是否match存在
@@ -280,17 +282,6 @@ func (kv *ShardKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 		return
 	}
 
-	// duplicate put/append request
-	/*if dup, ok := kv.Duplicate[args.ClientId]; ok {
-		// filter duplicate
-		if args.SerialNum == dup {
-			kv.UnLock()
-			reply.WrongLeader = false
-			reply.Err = OK
-			return
-		}
-	}*/
-
 	ops := Op {
 		Method : args.Op,
 		Key : args.Key,
@@ -308,7 +299,7 @@ func (kv *ShardKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	} else {
 		success := kv.await(index, term, ops)
 		if Debug == 1{
-			log.Println(kv.me, "my group", kv.gid, "Put: my current kvmap", kv.Kvmap, "ops is", ops)
+			//log.Println(kv.me, "my group", kv.gid, "Put: my current kvmap", kv.Kvmap, "ops is", ops)
 		}
 		if !success {
 			reply.WrongLeader = true
@@ -317,6 +308,29 @@ func (kv *ShardKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 			reply.Err = OK
 		}
 
+	}
+}
+
+func (kv *ShardKV) isRequestDuplicate(shard int, clientId int64, requestId int64) bool {
+	shardRequests, shardPresent := kv.latestRequests[shard]
+	if shardPresent {
+		lastRequest, isPresent := shardRequests[clientId]
+		return isPresent && lastRequest == requestId
+	}
+	return false
+}
+
+func (kv *ShardKV) applyClientOp(cmd Op) {
+	if !kv.isRequestDuplicate(key2shard(cmd.Key), cmd.ClientId, cmd.SerialNum) && cmd.Method != "Get" {
+		// Double check that shard exists on this node, then write
+		//if shardData, shardPresent := kv.data[key2shard(cmd.Key)]; shardPresent {
+			if cmd.Method == "Put" {
+				kv.Kvmap[cmd.Key] = cmd.Value
+			} else if cmd.Method == "Append" {
+				kv.Kvmap[cmd.Key] += cmd.Value
+			}
+			kv.latestRequests[key2shard(cmd.Key)][cmd.ClientId] = cmd.SerialNum // Safe since shard exists in `kv.data`
+		//}
 	}
 }
 
@@ -344,11 +358,9 @@ func (kv *ShardKV) periodCheckApplyMsg() {
 						// save the client id and its serial number
 						switch cmd.Method {
 						case "Put":
-							kv.Kvmap[cmd.Key] = cmd.Value
-							kv.Duplicate[cmd.ClientId] = cmd.SerialNum
+							kv.applyClientOp(cmd)
 						case "Append":
-							kv.Kvmap[cmd.Key] += cmd.Value
-							kv.Duplicate[cmd.ClientId] = cmd.SerialNum
+							kv.applyClientOp(cmd)
 						case "ExportComplete":
 							{
 								// remove kvmap, duplicate map, change ownership
@@ -376,8 +388,8 @@ func (kv *ShardKV) periodCheckApplyMsg() {
 										}
 									}
 									// add the duplicate map
-									for k,v := range cmd.Duplicate {
-										kv.Duplicate[k] = v
+									for k,v := range cmd.LatestRequests {
+										kv.latestRequests[cmd.ShardNumber][k] = v
 									}
 
 									kv.ShardStatusList[cmd.ShardNumber] = AVAILABLE									
@@ -697,7 +709,12 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister,
 
 	kv.applyCh = make(chan raft.ApplyMsg)
 	kv.Kvmap = make(map[string]string)
-	kv.Duplicate = make(map[int64]int64)
+	kv.latestRequests = make(map[int]map[int64]int64)
+
+	for i:=0; i < shardmaster.NShards; i++ {
+		kv.latestRequests[i] = make(map[int64]int64)
+	}
+
 	kv.isDecommissioned = false
 	kv.shutdown = make(chan struct{})
 
@@ -788,7 +805,7 @@ func (kv *ShardKV) broadcastMigrationStatus(status string, shard int, cfgNum int
 		ShardNumber : shard,
 		BroadcastCfgVersion : cfgNum,
 		Kvmap : kvmap,
-		Duplicate : duplicates,
+		LatestRequests : duplicates,
 	}
 
 	_,_, isLeader := kv.rf.Start(ops)
@@ -808,7 +825,7 @@ func (kv *ShardKV) sendMigrateShard(shard int, destGid int, cfgNum int, servers 
 	for k,v := range kv.Kvmap {
 		req.Kvmap[k] = v
 	}
-	for k,v := range kv.Duplicate {
+	for k,v := range kv.latestRequests[shard] {
 		req.Duplicate[k] = v
 	}
 
